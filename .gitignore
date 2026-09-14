@@ -1,0 +1,46 @@
+# ---- 密钥与本地配置（绝对不能进仓库）----
+.env
+.env.local
+.env.*.local
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+build/
+dist/
+
+# ---- 测试与检查工具缓存 ----
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# ---- 运行产物（数据库、日志、导出的报告）----
+data/*.db
+data/*.db-journal
+data/*.sqlite
+data/*.sqlite3
+*.log
+logs/
+
+# ---- 前端（将来加页面时用得上，先备着）----
+node_modules/
+dist/
+.next/
+*.tsbuildinfo
+
+# ---- IDE ----
+.idea/
+.vscode/
+*.swp
+
+# ---- 系统 ----
+.DS_Store
+Thumbs.db
+desktop.ini
