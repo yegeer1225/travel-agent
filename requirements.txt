@@ -1,0 +1,14 @@
+# ---- 核心：LangGraph 手写 agent loop ----
+langgraph>=1.2,<2
+langchain-core>=1.0,<2
+
+# ---- LLM 接入（OpenAI 兼容层，换供应商只改 .env）----
+langchain-openai>=1.0,<2
+
+# ---- 配置与 HTTP ----
+python-dotenv>=1.0
+httpx>=0.27
+pydantic>=2.0
+
+# ---- 测试 ----
+pytest>=8.0
