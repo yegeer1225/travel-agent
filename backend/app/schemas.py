@@ -33,7 +33,7 @@ import re
 from datetime import date as Date
 from datetime import datetime
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Generic, Literal, TypeVar
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
@@ -351,7 +351,7 @@ class AmapPoi(BaseModel):
 
 
 class SSEEventType(StrEnum):
-    SESSION = "session"  # 会话建立/恢复（第一条，必发）
+    SESSION = "session"  # 会话建立/恢复（**chat 的第一条，必发**；paste 不发，见下）
     NODE = "node"  # 图节点的开始/结束
     TOOL_CALL = "tool_call"  # 模型决定调工具
     TOOL_RESULT = "tool_result"  # 工具返回
@@ -363,6 +363,12 @@ class SSEEventType(StrEnum):
 
 
 class SessionEvent(BaseModel):
+    """会话建立 / 恢复。
+
+    ⚠️ **`/sessions/{id}/chat` 必发第一条；`/trips/paste` 不发** ——
+    粘贴走的是热启动，**不建会话**（A37），前端不能假设这条事件一定到。
+    """
+
     type: Literal["session"] = "session"
     session_id: str
     title: str | None = None
@@ -416,8 +422,14 @@ class CheckEvent(BaseModel):
 
 
 class DoneEvent(BaseModel):
+    """流正常结束。
+
+    ⚠️ 前端判断"这一轮成功"**只看这条事件**，不要靠 HTTP 层的 EOF ——
+    代理/网络断开也会让流结束，两者必须能区分（EOF 而没收到 done = 断流，要提示重试）。
+    """
+
     type: Literal["done"] = "done"
-    session_id: str
+    session_id: str | None = None  # ⚠️ paste 时**没有会话**，只能是 None（A37）
     trip_id: str | None = None
 
 
@@ -443,6 +455,411 @@ SSEEvent = Annotated[
 前端按 `type` 字段分发，**未知 type 必须忽略而不是报错**（方便后端加新事件）。"""
 
 
+# ══════════════════════════════════════════════════════════════
+#  五、HTTP 接口的请求 / 响应结构 —— `docs/api.md` 引用本节的类名
+#     ⚠️ 规则：api.md 里出现的每一个 JSON 结构，都必须在这里有定义。
+#        否则前后端就各拿一份契约，"冻结"就成了空话。
+# ══════════════════════════════════════════════════════════════
+
+
+T = TypeVar("T")
+
+
+class Page(BaseModel, Generic[T]):
+    """分页响应的统一外壳。**所有列表接口都长这样**，前端只写一次解包逻辑。"""
+
+    items: list[T] = Field(default_factory=list)
+    total: int = Field(default=0, ge=0)  # 满足条件的**总数**，不是本页条数
+    limit: int = Field(default=20, ge=1, le=100)
+    offset: int = Field(default=0, ge=0)
+
+
+class ErrorDetail(BaseModel):
+    code: str
+    """机器可判别的错误码（见 `docs/api.md` 错误码表）。前端**按 code 分支**，
+    不要匹配 msg —— msg 是给人看的，会改。"""
+
+    msg: str
+    detail: dict | None = None  # 可选的结构化补充，前端可以不处理
+
+
+class ErrorBody(BaseModel):
+    """**所有非 2xx 响应的唯一格式**（FastAPI 默认的 `{"detail": ...}` 会被改写成它）。
+
+    ⚠️ SSE 流里的错误**不走这里** —— HTTP 已经是 200 了，错误只能在 `error` 事件里报。
+    """
+
+    error: ErrorDetail
+
+
+# ── 会话与消息 ──────────────────────────────────────────────
+
+
+class MessageRole(StrEnum):
+    USER = "user"
+    ASSISTANT = "assistant"
+
+
+class ToolCallRecord(BaseModel):
+    """历史消息里"当时调了哪些工具"—— 前端靠它把轨迹卡画回来。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tool: str
+    args: dict
+    ok: bool
+    summary: str
+    degraded: bool = False
+
+
+class MessageMeta(BaseModel):
+    """`messages.meta_json` 列的结构。
+
+    🔴 **没有它，历史会话点开就只剩几行文字**，轨迹卡 / 行程卡 / 校验卡全丢 ——
+    而"看得见 agent 在干活"是这个项目最主要的差异点，历史里丢一半等于白做。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tool_calls: list[ToolCallRecord] = Field(default_factory=list)
+    trip_id: str | None = None  # 这条回复产出的行程（有则前端可画"行程卡"）
+    checks: list[Check] = Field(default_factory=list)
+
+
+class ChatMessage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    role: MessageRole
+    content: str
+    meta: MessageMeta | None = None
+    created_at: datetime
+
+
+class Session(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str
+    title: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class SessionDetail(BaseModel):
+    """`GET /sessions/{id}` 的响应 —— 恢复一次历史对话要的全部内容。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    session: Session
+    messages: list[ChatMessage] = Field(default_factory=list)
+
+
+class ChatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    message: str = Field(min_length=1, max_length=2000)
+    steer: bool = False
+    """True = 插队（agent 干活途中注入意见，走 `interrupt()`）。
+    默认 False = 新的一轮。前端上"边跑边改主意"的输入框才置 True。"""
+
+
+class PasteTripRequest(BaseModel):
+    """热启动：粘一段现成行程 / 攻略。**不建会话**（A37）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(min_length=10, max_length=20000)
+    destination: str | None = None  # 不填则从正文里解析；解析不出就按校验结果里最靠前的城市
+
+
+# ── 行程改动（确定性重算）──────────────────────────────────
+
+
+class TripOpKind(StrEnum):
+    MOVE = "move"
+    DELETE = "delete"
+    UPDATE_TIME = "update_time"
+
+
+class TripOp(BaseModel):
+    """界面二的每一次改动 = 一个 op。
+
+    💡 **只做这三个。** "加一站"走对话（对 agent 说"加个青城山"），
+    不在界面上做 —— 否则前端要自己实现"从候选池里挑一个 POI"，等于把选点逻辑搬前端。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    op: TripOpKind
+    day: int = Field(ge=1)
+    seq: int = Field(ge=1)  # 目标站当前的序号
+    to_seq: int | None = Field(default=None, ge=1)  # 仅 move：移到哪个序号
+    arrive: HHMM | None = None  # 仅 update_time
+    stay_min: int | None = Field(default=None, ge=0)  # 仅 update_time
+
+
+class PatchTripRequest(BaseModel):
+    """**一批 op 一次提交**，不是每拖一次发一个请求。
+
+    理由：拖一下 = 时间要重排 = 后半天全变。逐个提交会算出中间态，前端会闪。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    ops: list[TripOp] = Field(min_length=1, max_length=50)
+
+
+class RecheckResponse(BaseModel):
+    """`POST /trips/{id}/recheck` 的响应 —— 深度软校验（**只有它调 LLM**）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    trip_id: str
+    checks: list[Check] = Field(default_factory=list)
+    validation: Validation
+
+
+class AmapImportResponse(BaseModel):
+    """`POST /trips/{id}/amap-import` —— 高德 APP 唤端链接（MCP 的能力，不是画图）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    url: str
+    note: str | None = None
+
+
+# ── 景点 / 首页 ────────────────────────────────────────────
+
+
+class SpotCard(BaseModel):
+    """景点卡片 / 首页推荐用的**精简** POI。
+
+    为什么不直接吐 `AmapPoi`：那张卡上只放得下 6 个字段，
+    全量透传会让前端以为"必须显示全部"，也会把内部结构变成对外契约。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    poi_id: str
+    name: str
+    city: str | None = None
+    district: str | None = None  # adname，如"武侯区"
+    address: str | None = None
+    lng: float
+    lat: float
+    cost_per_person: float | None = None  # ⚠️ 人均消费，**不是门票**
+    rating: str | None = None
+    photos: list[str] = Field(default_factory=list)
+    typecode: str | None = None
+
+
+class SpotSearchResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[SpotCard] = Field(default_factory=list)
+    total: int = Field(default=0, ge=0)
+    source: Literal["amap", "mock"] = "amap"
+    cached: bool = False  # 命中进程内缓存（高德 QPS 限流，缓存是刚需不是优化）
+
+
+class HeroSlide(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    poi_id: str
+    name: str
+    city: str
+    photo: str  # 高德 photos[0]；取不到时前端显示纯色块 + 站名，**不用灰图**
+
+
+class HomeResponse(BaseModel):
+    """首页一次请求拿完（Hero + 猜你喜欢）。**一页一个请求**，前端少一个 loading 态。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    hero: list[HeroSlide] = Field(default_factory=list)
+    recommended: list[SpotCard] = Field(default_factory=list)
+
+
+# ── 攻略社区 / 收藏 ────────────────────────────────────────
+
+
+class TargetType(StrEnum):
+    """收藏 / 点赞 / 评论**共用的多态目标**（`comments.target_type`、`likes.target_type`）。
+
+    加一种可点赞的东西 = 加一个枚举值，不用新建表、不用改前端组件。
+    """
+
+    GUIDE = "guide"
+    POI = "poi"
+    COMMENT = "comment"
+
+
+class GuideListItem(BaseModel):
+    """攻略列表卡。`author_name` 由后端拼好 —— 前端不做 `author_type` 分支渲染。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    guide_id: str
+    title: str
+    summary: str  # 正文前 80 字，**后端截**（前端截会出现半句话 + 一堆换行）
+    destination: str | None = None
+    cover: str | None = None
+    author_name: str  # author_type=system 时是"官方"
+    author_type: AuthorType
+    visibility: Visibility
+    like_count: int = Field(default=0, ge=0)
+    comment_count: int = Field(default=0, ge=0)
+    published_at: datetime | None = None
+    created_at: datetime
+
+
+class GuideDetail(GuideListItem):
+    model_config = ConfigDict(extra="forbid")
+
+    content_md: str
+    poi_ids: list[str] = Field(default_factory=list)
+    liked: bool = False  # 当前用户是否点过赞（未登录恒 False）
+
+
+class GuideUpsertRequest(BaseModel):
+    """创建 / 修改攻略。PATCH 时**只传要改的字段**（`exclude_unset`）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = Field(default=None, min_length=1, max_length=100)
+    content_md: str | None = None
+    destination: str | None = None
+    cover: str | None = None
+    poi_ids: list[str] | None = None
+
+
+class CommentItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    comment_id: str
+    target_type: TargetType
+    target_id: str
+    author_name: str
+    author_type: AuthorType
+    content: str
+    created_at: datetime
+    is_mine: bool = False  # 前端据此决定显不显示"删除"
+
+
+class CommentCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    content: str = Field(min_length=1, max_length=500)
+
+
+class LikeToggleRequest(BaseModel):
+    """一个接口干两件事：没点过就点赞，点过就取消。返回**最终状态**。
+
+    好处：前端不用猜自己现在处于哪一态，也不用发两个请求。
+    ⚠️ 并发下靠 `likes` 表的**唯一索引**兜底（`(user_id,target_type,target_id)`），
+    重复插入报 IntegrityError 就当"已经点过"，不报 500。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    target_type: TargetType
+    target_id: str
+
+
+class LikeState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target_type: TargetType
+    target_id: str
+    liked: bool
+    count: int = Field(ge=0)  # 先 `COUNT(*)` 现算，不加冗余字段（见 `技术方案.md` 三节）
+
+
+class FavoriteCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target_type: TargetType
+    target_id: str
+
+
+class FavoriteItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target_type: TargetType
+    target_id: str
+    name: str  # 后端 join 出来，前端不做二次请求
+    cover: str | None = None
+    created_at: datetime
+
+
+# ── 用户 / 鉴权（M9）──────────────────────────────────────
+
+
+class RegisterRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    username: str = Field(min_length=3, max_length=32, pattern=r"^[A-Za-z0-9_]+$")
+    password: str = Field(min_length=6, max_length=72)
+    """⚠️ 上限 72 是 **bcrypt 的硬限制**（超了会被静默截断，等于密码变短）。
+    这里挡住比在哈希函数里报错好排查。"""
+
+    nickname: str | None = Field(default=None, max_length=32)
+
+
+class LoginRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    username: str
+    password: str
+
+
+class UserOut(BaseModel):
+    """**永远不含 `password_hash`。** 这个类就是"哪些字段能出网"的白名单。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: int
+    username: str
+    nickname: str | None = None
+    email: str | None = None
+    avatar: str | None = None
+    created_at: datetime
+
+
+class AuthResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    token: str
+    expires_in: int  # 秒。前端据此决定何时清 token（**不做 refresh**，见技术方案三节） 
+    user: UserOut
+
+
+class UpdateProfileRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    nickname: str | None = Field(default=None, max_length=32)
+    email: str | None = Field(default=None, max_length=128)
+    avatar: str | None = None
+
+
+class AvatarUploadResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    url: str
+
+
+class HealthResponse(BaseModel):
+    """`GET /health` —— 豆包联调第一步就调它，用来判断"后端起没起、是不是 mock"。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ok: bool
+    mock_mode: bool
+    model_tool: str
+    model_plan: str
+    amap_configured: bool
+
+
 __all__ = [
     # 枚举
     "TripSource",
@@ -453,6 +870,9 @@ __all__ = [
     "AuthorType",
     "Visibility",
     "SSEEventType",
+    "MessageRole",
+    "TripOpKind",
+    "TargetType",
     # 工具类型
     "HHMM",
     # 行程契约
@@ -478,4 +898,39 @@ __all__ = [
     "DoneEvent",
     "ErrorEvent",
     "SSEEvent",
+    # HTTP 请求/响应（api.md 引用）
+    "Page",
+    "ErrorDetail",
+    "ErrorBody",
+    "ToolCallRecord",
+    "MessageMeta",
+    "ChatMessage",
+    "Session",
+    "SessionDetail",
+    "ChatRequest",
+    "PasteTripRequest",
+    "TripOp",
+    "PatchTripRequest",
+    "RecheckResponse",
+    "AmapImportResponse",
+    "SpotCard",
+    "SpotSearchResponse",
+    "HeroSlide",
+    "HomeResponse",
+    "GuideListItem",
+    "GuideDetail",
+    "GuideUpsertRequest",
+    "CommentItem",
+    "CommentCreateRequest",
+    "LikeToggleRequest",
+    "LikeState",
+    "FavoriteCreateRequest",
+    "FavoriteItem",
+    "RegisterRequest",
+    "LoginRequest",
+    "UserOut",
+    "AuthResponse",
+    "UpdateProfileRequest",
+    "AvatarUploadResponse",
+    "HealthResponse",
 ]
