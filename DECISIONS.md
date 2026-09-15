@@ -127,25 +127,60 @@
 
 ## 二、模型与数据层
 
-### D8 · 思考模式「按节点分设」，不是全局开关　`A24`　2026-09-15
+### D8 · 思考模式「按节点分设」，不是全局开关　`A24`　2026-09-15（当晚复测修正）
 
 > **决定**：挂 tools 的节点**关**思考（`extra_body={"thinking":{"type":"disabled"}}`）；不挂 tools 的规划/生成节点**开**思考。
 
-这是本项目**唯一一条由实测反向定型架构**的决定，值得写全：
+🔴 **本条被复测修正过一次 —— 决定不变，但理由换掉了。原理由不成立。**
 
-| 实测发现 | 后果 |
+**原理由（作废）**：旧版记的是"带 `tools` + 历史缺 `reasoning_content` → **400**（2/2 稳定复现）"。
+
+**复测结果：未能复现。** flash / v4-pro 各测，五种组合**全部通过**：
+
+| 组合 | 结果 |
 |---|---|
-| 🔴 请求**带 `tools`** 且历史 assistant 缺 `reasoning_content` → **400**（2/2 稳定复现） | 而这字段**不是 OpenAI 标准字段，`langchain-openai` 会静默剥掉它** —— 同类事故已见于 opencode、claude-code-router、n8n |
-| 🔴 思考模式下 **`temperature` 完全失效**（官方原话 "will also have no effect"） | `方案.md` 风险 3 的"压低 temperature 降方差"**当场作废** —— 只在关思考的节点上有效 |
-| ✅ **不带 `tools` 的请求完全绕过该校验**，且思考真实生效 | 于是"挂 tools ⇒ 关思考"既解决了 400，又保住了规划节点的 CoT |
+| 带 tools + 思考 + **原样回传** `reasoning_content` | ✅ 通过 |
+| 带 tools + 思考 + **剥掉** `reasoning_content` 再回传 | ✅ 通过 |
+| 带 tools + **全程关思考** | ✅ 通过 |
+| 不带 tools + 思考 + 剥掉 reasoning | ✅ 通过 |
+| **连续 4 轮**，每轮都剥掉 reasoning 再回传 | ✅ 通过 |
+
+→ 可复现脚本：`backend/scripts/probe_llm_structured.py`（随时重跑）
+
+**现在的理由（两条，都比原来更硬）**：
+
+| 理由 | 实测依据 |
+|---|---|
+| 🔴 **成本**：`reasoning_tokens` 计入 `completion_tokens` | 一个最简请求实测 = `prompt 42 + completion 163`，**其中推理占 160**。工具循环 ≤8 轮，每轮开思考 = 多烧数倍 token —— 而"搜武侯祠还是搜熊猫基地"根本不需要 CoT |
+| 🔴 **确定性**：思考模式下 `temperature` 生效不了 | 官方原话 "will also have no effect"。**关掉之后 `temperature=0` 才真正生效** → 同样的输入得到同样的工具选择，可复现、可调试 |
+
+⚠️ **真正的教训（比结论本身重要）**：旧版把"2/2 复现"写成了稳定结论，却**没留下可重复的复现脚本** ——
+所以过了半天就没人能验证它到底是真是假。**"我实测过"而不给出可重跑的路径，等于没实测。**
+现已固化成脚本，结论与复现方式绑在一起。
 
 | 替代方案 | 否决理由 |
 |---|---|
-| 全程关思考 | 规划节点的 CoT 没了，行程质量下降；且"思考"是这个模型的主要卖点 |
-| 全程开思考 + 自己把 `reasoning_content` 塞回历史 | 要绕过 `langchain-openai` 的剥离行为（自定义消息序列化），**框架一升级就再炸一次**，且这是给一个未文档化的字段做兼容层 |
-| 换掉 `langchain-openai` 直接手写 OpenAI SDK 调用 | 为了一个字段放弃整个 LangChain 生态，代价与收益不成比例 |
+| 全程关思考 | 规划节点的 CoT 没了，行程质量下降；思考是这个模型的主要卖点 |
+| 全程开思考 + 自己把 `reasoning_content` 塞回历史 | 要绕过 `langchain-openai` 的剥离行为（自定义消息序列化）—— **框架一升级就再崩一次**，且这是给一个未文档化字段做兼容层 |
+| 换掉 `langchain-openai` 直接手写 OpenAI SDK | 为了一个字段放弃整个生态，代价与收益不成比例 |
 
-**代价**：节点要分两类写，`MODEL_REGISTRY` 里得标好"这个节点挂不挂 tools"；**新增节点时必须显式选择思考开关**（漏选就是线上 400）。
+**代价**：节点要分两类写；**新增节点时必须显式选择思考开关**
+（`config.py` 已有守卫：`LLM_THINKING_TOOL=enabled` 直接 `raise`）。
+
+**同一轮复测还钉下三条会踩到的真事实**：
+
+1. 🔴 **漏回应 `tool_calls` 会 400**（实测复现，这条**真的会踩**）：
+   `An assistant message with 'tool_calls' must be followed by tool messages responding to each 'tool_call_id'`
+   → 模型一次返回**多个** `tool_calls` 时，必须**逐个**用 `tool` 消息回应。
+   **手写 `tool_step` 不能只取 `tool_calls[0]`。**
+2. 🔴 **`with_structured_output()` 默认不可用**：
+   `response_format={"type":"json_schema"}` → `400 This response_format type is unavailable now`
+   （去掉 `additionalProperties` 也一样 —— **是整个类型不支持，跟 schema 内容无关**）。
+   只有 `{"type":"json_object"}` 可用 → `generate_plan` 走 **`json_object` + prompt 写清 schema + Pydantic 校验**。
+3. **思考内容在 SDK 层看不到**：原始 HTTP 响应里 `message.reasoning_content` 有 94~252 字、
+   `usage` 里有 `reasoning_tokens`，但 `langchain-openai` 会剥掉它（`additional_kwargs` 里没有）。
+   想要思考内容只能自己发原始请求。
+
 **附带事实**：模型名只有 `deepseek-flash` / `deepseek-v4-pro`，**没有** `deepseek-v4.1-flash`（填错直接 404）。中文需显式约束，无 system prompt 时回英文。
 
 ---

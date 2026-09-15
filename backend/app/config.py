@@ -84,7 +84,10 @@ class Settings:
     llm_model_plan: str
     """**不挂 tools 的节点**（规划 / 生成）用这个模型。"""
     llm_thinking_tool: str
-    """带 tools 的节点必须 `disabled` —— 否则 DeepSeek 稳定 400（见 D8）。"""
+    """带 tools 的节点必须 `disabled`。理由 = **成本 + 确定性**，**不是**"会 400"
+    （那条 2026-09-15 晚复测未复现，见 D8）：
+    `reasoning_tokens` 计入 `completion_tokens`（实测推理占 160/163），
+    且思考模式下 `temperature` 失效、关掉后 `temperature=0` 才生效。"""
     llm_thinking_plan: str
     """不挂 tools 的节点可以 `enabled`，思考真实生效且能保住 CoT。"""
 
@@ -120,7 +123,8 @@ class Settings:
     def thinking_body(self, *, with_tools: bool) -> dict[str, dict[str, str]]:
         """构造 `extra_body={"thinking": {"type": ...}}`。
 
-        这是本项目**最容易踩 400 的一处**，所以不给调用方自己拼字符串的机会：
+        不让调用方自己拼字符串，因为拼错一个字面量（`"disable"` vs `"disabled"`）
+        服务端**不会报错** —— 它会静默按默认值跑，而默认是**开**的。
         传 `with_tools=True` 就自动取 `LLM_THINKING_TOOL`。
 
         ⚠️ DeepSeek 思考模式下 `temperature` 失效（官方原话 "will also have no effect"），
@@ -166,10 +170,13 @@ def _build() -> Settings:
 
     thinking_tool = _optional("LLM_THINKING_TOOL", "disabled").lower()
     if thinking_tool == "enabled":
-        # 这是硬约束，不是建议：带 tools + 开思考 = DeepSeek 稳定 400（实测 2/2）
+        # 守卫保留，理由已更新（2026-09-15 晚复测）：
+        # **不是**为了躲 400（那条未复现），而是 ——
+        #   · 成本：reasoning_tokens 计入 completion_tokens，工具循环 ≤8 轮会多烧数倍
+        #   · 确定性：思考模式下 temperature 失效；关掉后 temperature=0 才生效
         raise ConfigError(
-            "LLM_THINKING_TOOL 不能是 enabled —— 带 tools 的请求开启思考会稳定 400。"
-            "详见 DECISIONS.md D8"
+            "LLM_THINKING_TOOL 不能是 enabled —— 工具循环节点必须关思考"
+            "（成本 + 确定性，详见 DECISIONS.md D8）"
         )
 
     return Settings(
