@@ -34,6 +34,7 @@ from langchain_core.tools import BaseTool, tool
 from app.providers.base import AmapProvider
 from app.schemas import WeatherStatus
 from app.tools import poi_pool
+from app.tools.poi_rank import label_of, rank_pois
 
 MAX_CANDIDATES = 8
 """一次搜索最多给模型看几个候选。
@@ -41,6 +42,16 @@ MAX_CANDIDATES = 8
 不暴露给模型当参数是**故意的**：让它设 `limit` 只会多一个可以设错的地方，
 而它并不知道"多给几个"和"少给几个"哪个对自己的决策更好。
 """
+
+SEARCH_FETCH = 20
+"""**内部**取回多少条（模型看不到这个数）。
+
+为什么不直接取 `MAX_CANDIDATES` 条：实测搜"都江堰"时前 8 条里只有 1 条是景点
+（其余是市政府 / 客运中心 / 快铁站 / 道路名），取 8 条就**没得挑**了。
+多取的这 12 条**不进 prompt**（token 成本一点不变），
+只用来让"把能当站点的挑到前排"这件事有材料可用 —— 见 `poi_rank`。
+
+⚠️ 高德 `offset` 文档上限 25，取 20 是**不贴边界**的值。"""
 
 
 def _parse_date(value: str) -> date:
@@ -73,19 +84,27 @@ def build_amap_tools(
 
     @tool
     async def search_poi(keyword: str, city: str = "") -> str:
-        """按关键词搜索地点（景点 / 餐厅 / 酒店 / 商场 / 车站等），返回候选清单。
+        """按关键词搜索地点（景点 / 公园 / 博物馆 / 餐厅 / 商场等），返回候选清单。
 
         返回的每一项都带一个 **id**。本次规划里**所有引用地点的地方都必须用这个 id**，
         不要凭记忆或常识填写任何搜索没返回过的地点。
 
+        ⚠️ 清单**已经按"能不能当行程里的一站"排过序**：前面是景区 / 公园 / 博物馆
+        这类可以直接排进去的地点，越往后越可能是车站、售票处、停车场、酒店等服务设施。
+        **那些服务设施不是景点，不要排进行程** —— 如果前几条都不合适，
+        换一个更具体的关键词重搜，而不是往后翻着挑。
+
         Args:
-            keyword: 搜索词，例如"武侯祠"、"火锅"、"酒店"。越具体越容易命中。
+            keyword: 搜索词，例如"武侯祠"、"火锅"、"公园"。越具体越容易命中。
             city: 城市名，例如"成都"。留空则用本次行程的目的地。
         """
         target_city = city.strip() or default_city
-        pois = await provider.search_poi(keyword, city=target_city, limit=MAX_CANDIDATES)
+        # 多取一些（`SEARCH_FETCH`）→ 重排 → 再截断到 `MAX_CANDIDATES`。
+        pois = await provider.search_poi(keyword, city=target_city, limit=SEARCH_FETCH)
 
-        # ★ 记进池子 —— 这是"模型没编造"能被证明的唯一途径
+        # ★ 记进池子 —— 这是"模型没编造"能被证明的唯一途径。
+        #   记的是**全量**（不是截断后的 8 条）：截断只发生在展示层，
+        #   校验层能看到的 `poi_id` 越多，越不会把"其实搜到过"判成"编的"。
         poi_pool.record(pois)
 
         if not pois:
@@ -96,9 +115,15 @@ def build_amap_tools(
                 f"就少安排一个站点，而不是编一个出来。"
             )
 
-        lines = [f"{len(pois)} 个候选（关键词「{keyword}」，城市 {target_city}）："]
-        for p in pois:
+        shown = rank_pois(pois)[:MAX_CANDIDATES]
+        lines = [f"{len(shown)} 个候选（关键词「{keyword}」，城市 {target_city}）："]
+        for p in shown:
             parts = [p.poi_id, p.name]
+            label = label_of(p.type)
+            if label:
+                # 带类型标签的收益**量不出来**（条目没变），但成本是每行 6 个字符。
+                # 它让模型知道"第 3 条是地铁站"从而不去选它 —— 零成本保险。
+                parts.append(f"[{label}]")
             if p.rating:
                 parts.append(f"评分{p.rating}")
             parts.append(f"开放{p.open_time}" if p.open_time else "开放时间未知")

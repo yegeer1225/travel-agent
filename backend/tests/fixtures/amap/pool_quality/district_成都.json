@@ -1,0 +1,20 @@
+{
+  "status": "1",
+  "info": "OK",
+  "infocode": "10000",
+  "count": "1",
+  "suggestion": {
+    "keywords": [],
+    "cities": []
+  },
+  "districts": [
+    {
+      "citycode": "028",
+      "adcode": "510100",
+      "name": "成都市",
+      "center": "104.066301,30.572961",
+      "level": "city",
+      "districts": []
+    }
+  ]
+}

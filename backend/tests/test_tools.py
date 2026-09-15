@@ -18,8 +18,9 @@ from datetime import date
 import pytest
 
 from app.providers.mock import MOCK_CITY, MockAmapProvider
+from app.schemas import AmapPoi
 from app.tools import build_amap_tools, current_pool, poi_pool_scope
-from app.tools.amap_tools import MAX_CANDIDATES
+from app.tools.amap_tools import MAX_CANDIDATES, SEARCH_FETCH
 
 TODAY = date(2026, 9, 15)
 
@@ -129,6 +130,149 @@ def test_search_uses_default_city_when_omitted(provider: MockAmapProvider) -> No
     t = {x.name: x for x in build_amap_tools(provider, default_city=MOCK_CITY)}
     text = run(t["search_poi"].ainvoke({"keyword": "武侯祠"}))  # type: ignore[attr-defined]
     assert "B001C07VJ2" in text
+
+
+# ══════════════════════════════════════════════════════════════
+#  二之二、search_poi 的「多取 → 重排 → 截断」三段式
+#
+#  ⚠️ 这一节**故意不用 mock provider**：mock 池只有 9 个 POI，
+#     而且它们本来就没有"噪音排在前面"这种形态，验不出重排。
+#     这里用一个按剧本回话的桩，把"高德会把车站/政府排在前排"这件事
+#     做成**可控的输入**。
+# ══════════════════════════════════════════════════════════════
+
+
+def make_poi(poi_id: str, name: str, type_str: str | None) -> AmapPoi:
+    return AmapPoi(poi_id=poi_id, name=name, type=type_str, lng=104.0, lat=30.6)
+
+
+class ScriptedSearchProvider:
+    """只为 `search_poi` 造的桩：返回**预设顺序**的候选，并记下每次的 `limit`。"""
+
+    name = "scripted"
+
+    def __init__(self, pois: list[AmapPoi]) -> None:
+        self.pois = pois
+        self.limits: list[int] = []
+
+    async def search_poi(
+        self, keyword: str, city: str | None = None, limit: int = 10
+    ) -> list[AmapPoi]:
+        self.limits.append(limit)
+        return self.pois[:limit]
+
+    async def get_weather(self, city: str, day: date):  # pragma: no cover - 用不到
+        raise NotImplementedError
+
+    async def calc_distance(self, origin, dest):  # pragma: no cover - 用不到
+        raise NotImplementedError
+
+
+def _search_with(provider: ScriptedSearchProvider) -> tuple[str, int]:
+    """跑一次 search_poi，返回 (给模型的文本, 池子大小)。"""
+    tools = {t.name: t for t in build_amap_tools(provider)}  # type: ignore[arg-type]
+
+    async def scene() -> tuple[str, int]:
+        with poi_pool_scope() as pool:
+            text = await tools["search_poi"].ainvoke({"keyword": "都江堰"})  # type: ignore[attr-defined]
+            return text, len(pool)
+
+    return run(scene())
+
+
+def test_search_fetches_more_than_it_shows() -> None:
+    """🔴 三段式：内部取 `SEARCH_FETCH` 条 → 重排 → 只给模型看 `MAX_CANDIDATES` 条。
+
+    为什么要多取：实测搜"都江堰"前 8 条里只有 2 条是景点，取 8 条就**没得挑**。
+    多取的条**不进 prompt** —— token 成本一点不变，只是让"把景点挑到前排"有材料。
+    """
+    pois = [make_poi(f"P{i}", f"地点{i}", "风景名胜;风景名胜;风景名胜") for i in range(SEARCH_FETCH)]
+    provider = ScriptedSearchProvider(pois)
+    text, pool_size = _search_with(provider)
+
+    assert provider.limits == [SEARCH_FETCH], "内部取回量不是 SEARCH_FETCH"
+    assert SEARCH_FETCH > MAX_CANDIDATES, "多取必须真的多于展示，否则这个设计没意义"
+    assert len(text.splitlines()) == 1 + MAX_CANDIDATES, "展示条数不是 MAX_CANDIDATES"
+
+
+def test_pool_keeps_the_full_result_despite_truncated_display() -> None:
+    """池子记**全量**，截断只发生在展示层。
+
+    反过来做（池子只记展示的 8 条）会让"模型引用了一条它其实搜到过、
+    只是没被展示的 POI"被判成"编造" —— 校验层会冤枉模型。
+    """
+    pois = [make_poi(f"P{i}", f"地点{i}", "风景名胜;风景名胜;风景名胜") for i in range(SEARCH_FETCH)]
+    _, pool_size = _search_with(ScriptedSearchProvider(pois))
+    assert pool_size == SEARCH_FETCH
+
+
+def test_search_shows_sites_before_service_facilities() -> None:
+    """🔴 重排生效：即使高德把服务设施排在前排，展示时景点在前。
+
+    输入顺序照抄**真实样本**（`fixtures/amap/pool_quality/kw_都江堰.json`）：
+    前三条是市政府 / 客运中心 / 公交站，景点在第 4 位。
+    """
+    provider = ScriptedSearchProvider(
+        [
+            make_poi("S1", "都江堰市人民政府", "政府机构及社会团体;政府机关;区县级政府及事业单位"),
+            make_poi("S2", "都江堰市客运中心", "交通设施服务;长途汽车站;长途汽车站"),
+            make_poi("S3", "都江堰快铁站(公交站)", "交通设施服务;公交车站;公交车站相关"),
+            make_poi("S4", "都江堰景区", "风景名胜;风景名胜;国家级景点"),
+        ]
+    )
+    text, _ = _search_with(provider)
+    first = text.splitlines()[1]
+    assert "都江堰景区" in first, f"重排没生效，第一条是：{first}"
+
+
+def test_multi_value_type_is_not_demoted() -> None:
+    """🔴 多值 `type` 取**最优**档 —— 宽窄巷子不能被当成购物场所排到后面。
+
+    真实值：`购物服务;特色商业街;特色商业街|风景名胜;风景名胜相关;旅游景点`。
+    只看第一段（购物服务）会让一个顶级景点被"景点"挤下去。
+    """
+    provider = ScriptedSearchProvider(
+        [
+            make_poi("S1", "某地铁站", "交通设施服务;地铁站;地铁站"),
+            make_poi("S2", "宽窄巷子景区", "购物服务;特色商业街;特色商业街|风景名胜;风景名胜相关;旅游景点"),
+            make_poi("S3", "成都太古里", "购物服务;商场;购物中心"),
+        ]
+    )
+    text, _ = _search_with(provider)
+    lines = text.splitlines()[1:]
+    assert "宽窄巷子景区" in lines[0], f"宽窄巷子被降级了，第一条是：{lines[0]}"
+
+
+def test_search_labels_each_candidate_with_type() -> None:
+    """每行要带类型标签 —— 量不出收益但成本极低的"零成本保险"。
+
+    模型知道第 3 条是"地铁站"，就不会把它排进行程。断言到标签**内容**级，
+    不只是"有方括号"，否则改错取哪一段也发现不了。
+    """
+    provider = ScriptedSearchProvider(
+        [
+            make_poi("S1", "都江堰景区", "风景名胜;风景名胜;国家级景点"),
+            make_poi("S2", "某火锅店", "餐饮服务;中餐厅;火锅店"),
+            make_poi("S3", "某售票处", "生活服务;售票处;公园景点售票处"),
+        ]
+    )
+    text, _ = _search_with(provider)
+    assert "[国家级景点]" in text
+    assert "[火锅店]" in text
+    assert "[公园景点售票处]" in text
+
+
+def test_search_description_warns_service_facilities_are_not_sights(
+    tools: dict[str, object],
+) -> None:
+    """docstring 必须**明说**后半段可能是服务设施、不要排进行程。
+
+    这条约束写在工具描述里（模型决定要不要调它时就会读到），
+    不是写在 system prompt —— 那是"把约束写在它生效的地方"（见模块 docstring ③）。
+    """
+    desc = tools["search_poi"].description  # type: ignore[attr-defined]
+    assert "服务设施" in desc
+    assert "不要排进行程" in desc
 
 
 # ══════════════════════════════════════════════════════════════

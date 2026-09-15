@@ -1,0 +1,20 @@
+{
+  "status": "1",
+  "info": "OK",
+  "infocode": "10000",
+  "count": "1",
+  "suggestion": {
+    "keywords": [],
+    "cities": []
+  },
+  "districts": [
+    {
+      "citycode": "028",
+      "adcode": "510181",
+      "name": "都江堰市",
+      "center": "103.647193,30.988763",
+      "level": "district",
+      "districts": []
+    }
+  ]
+}
