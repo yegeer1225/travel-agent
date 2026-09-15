@@ -1,0 +1,382 @@
+{
+  "pois": [
+    {
+      "parent": "B001C7WG43",
+      "pcode": "510000",
+      "keytag": "串串香",
+      "type": "餐饮服务;中餐厅;中餐厅",
+      "photos": [
+        {
+          "title": [],
+          "url": "https://store.is.autonavi.com/showpic/5f1a028787188d69cd0028c97dc71863"
+        },
+        {
+          "title": [],
+          "url": "https://store.is.autonavi.com/showpic/48adb931ee5c958f0000003123060871?type=pic"
+        },
+        {
+          "title": [],
+          "url": "https://store.is.autonavi.com/showpic/387ffc6443ad173c0000006006510195?type=pic"
+        }
+      ],
+      "building": [],
+      "typecode": "050100",
+      "poiweight": [],
+      "citycode": "028",
+      "adname": "锦江区",
+      "children": [],
+      "featured_reviews_remake": [],
+      "tel": "18123356772",
+      "id": "B0LATS7BTE",
+      "tag": "特色菜,串串,牛肉",
+      "entr_location": "104.077595,30.651205",
+      "adcode": "510104",
+      "pname": "四川省",
+      "biz_type": "diner",
+      "cityname": "成都市",
+      "postcode": [],
+      "business_area": "东大街",
+      "childtype": "202",
+      "atag": "特色菜,串串,牛肉",
+      "name": "龙户人家串串香火锅(春熙路店)",
+      "shopid": [],
+      "favorite_num": [],
+      "navi_poiid": [],
+      "distance": [],
+      "importance": [],
+      "biz_ext": {
+        "cost": "73.00",
+        "opentime2": "周一至周日 11:00-02:00",
+        "rating": "4.7",
+        "open_time": "11:00-02:00",
+        "meal_ordering": "0"
+      },
+      "recommend": "0",
+      "discount_num": "0",
+      "gridcode": "4504708600",
+      "shopinfo": "0",
+      "alias": [],
+      "event": [],
+      "indoor_map": "0",
+      "email": [],
+      "timestamp": "2026-09-11 09:45:49",
+      "website": [],
+      "address": "红星路四段265号附1号",
+      "space_num": [],
+      "match": "0",
+      "indoor_data": {
+        "cmsid": [],
+        "truefloor": [],
+        "cpid": [],
+        "floor": []
+      },
+      "exit_location": [],
+      "location": "104.077761,30.651100",
+      "groupbuy_num": "0",
+      "featured_reviews": []
+    },
+    {
+      "parent": "B0LKVH3MZY",
+      "pcode": "510000",
+      "keytag": "饮品",
+      "type": "餐饮服务;咖啡厅;星巴克咖啡",
+      "photos": [
+        {
+          "title": [],
+          "url": "https://store.is.autonavi.com/showpic/eca5e175921fc25f0000002314172380?type=pic"
+        },
+        {
+          "title": [],
+          "url": "https://aos-comment.amap.com/B0KKXOIEPQ/comment/ED51C437_4333_4173_801B_CEDCB820F106_L0_001_1179_147_1766593420291_17032035.jpg"
+        },
+        {
+          "title": [],
+          "url": "https://store.is.autonavi.com/showpic/febaf9144728addb0000002022848739?type=pic"
+        }
+      ],
+      "building": [],
+      "typecode": "050501",
+      "poiweight": [],
+      "citycode": "028",
+      "adname": "武侯区",
+      "children": [],
+      "featured_reviews_remake": [],
+      "tel": "028-67871820",
+      "id": "B0KKXOIEPQ",
+      "tag": "下午茶,单人餐",
+      "entr_location": [],
+      "adcode": "510107",
+      "pname": "四川省",
+      "biz_type": "diner",
+      "cityname": "成都市",
+      "postcode": [],
+      "business_area": "交子商圈",
+      "childtype": "202",
+      "atag": "下午茶,单人餐",
+      "name": "星巴克(成都SKP店)",
+      "shopid": [],
+      "favorite_num": [],
+      "navi_poiid": [],
+      "distance": [],
+      "importance": [],
+      "biz_ext": {
+        "cost": "30.00",
+        "opentime2": "周一至周日 08:00-22:30",
+        "rating": "4.3",
+        "open_time": "08:00-22:30",
+        "meal_ordering": "0"
+      },
+      "recommend": "0",
+      "discount_num": "0",
+      "gridcode": "4504608511",
+      "shopinfo": "0",
+      "alias": [],
+      "event": [],
+      "indoor_map": "0",
+      "email": [],
+      "timestamp": "2026-09-10 18:19:23",
+      "website": [],
+      "address": "天府大道北段2001成都SKP北馆2层D2104之1号星巴克专柜",
+      "space_num": [],
+      "match": "0",
+      "indoor_data": {
+        "cmsid": [],
+        "truefloor": [],
+        "cpid": [],
+        "floor": []
+      },
+      "exit_location": [],
+      "location": "104.070175,30.571025",
+      "groupbuy_num": "0",
+      "featured_reviews": []
+    },
+    {
+      "parent": [],
+      "pcode": "510000",
+      "keytag": "青年旅舍",
+      "type": "住宿服务;旅馆招待所;旅馆招待所",
+      "photos": [
+        {
+          "provider": [],
+          "title": "外观",
+          "url": "https://store.is.autonavi.com/showpic/38157254d56c1a55db95d0241c9621a8"
+        },
+        {
+          "provider": [],
+          "title": [],
+          "url": "https://store.is.autonavi.com/showpic/01ecc8911328d59f005bbc23276f19c1"
+        },
+        {
+          "provider": [],
+          "title": "三人间",
+          "url": "https://store.is.autonavi.com/showpic/6c5a9fa0cbd977d4889d328caff44eca"
+        }
+      ],
+      "building": [],
+      "typecode": "100200",
+      "poiweight": [],
+      "citycode": "028",
+      "adname": "锦江区",
+      "children": [],
+      "featured_reviews_remake": [],
+      "tel": "028-62500185",
+      "id": "B001C8RR9I",
+      "tag": [],
+      "entr_location": "104.07793,30.6502",
+      "adcode": "510104",
+      "pname": "四川省",
+      "biz_type": "hotel",
+      "cityname": "成都市",
+      "postcode": [],
+      "business_area": "东大街",
+      "childtype": [],
+      "atag": [],
+      "name": "POSHPACKER拖板鞋青年旅舍旅行民宿(成都太古里春熙路地铁站店)",
+      "shopid": [],
+      "favorite_num": [],
+      "navi_poiid": [],
+      "distance": [],
+      "importance": [],
+      "biz_ext": {
+        "cost": [],
+        "star": [],
+        "opentime2": [],
+        "rating": "4.6",
+        "lowest_price": [],
+        "hotel_ordering": "1",
+        "open_time": []
+      },
+      "recommend": "0",
+      "discount_num": "0",
+      "gridcode": "4504708600",
+      "shopinfo": "0",
+      "alias": [],
+      "event": [],
+      "indoor_map": "0",
+      "email": [],
+      "timestamp": "2026-09-15 16:32:33",
+      "website": [],
+      "address": "东升街98号3楼(春熙路地铁站E2口步行350米)",
+      "space_num": [],
+      "match": "0",
+      "indoor_data": {
+        "cmsid": [],
+        "truefloor": [],
+        "cpid": [],
+        "floor": []
+      },
+      "exit_location": [],
+      "location": "104.078001,30.650365",
+      "groupbuy_num": "0",
+      "featured_reviews": []
+    },
+    {
+      "parent": [],
+      "pcode": "510000",
+      "keytag": "地铁站",
+      "type": "交通设施服务;地铁站;地铁站",
+      "photos": [
+        {
+          "title": [],
+          "url": "https://store.is.autonavi.com/showpic/7edeb2a4ae4416090000005145704959?type=pic"
+        },
+        {
+          "title": [],
+          "url": "https://store.is.autonavi.com/showpic/7836193542e89bc20000002741893000?type=pic"
+        },
+        {
+          "title": [],
+          "url": "https://aos-comment.amap.com/BV10069540/comment/25BBCB23_E4B7_480B_8CA5_EF0D9C3D8C02_L0_001_1170_116_1761877479163_89280789.jpg"
+        }
+      ],
+      "building": [],
+      "typecode": "150500",
+      "poiweight": [],
+      "citycode": "028",
+      "adname": "郫都区",
+      "children": [],
+      "featured_reviews_remake": [],
+      "tel": "028-61638000",
+      "id": "BV10069540",
+      "tag": [],
+      "entr_location": [],
+      "adcode": "510117",
+      "pname": "四川省",
+      "biz_type": [],
+      "cityname": "成都市",
+      "postcode": [],
+      "business_area": [],
+      "childtype": [],
+      "atag": [],
+      "name": "犀浦(地铁站)",
+      "shopid": [],
+      "favorite_num": [],
+      "navi_poiid": [],
+      "distance": [],
+      "importance": [],
+      "biz_ext": {
+        "cost": [],
+        "opentime2": [],
+        "rating": [],
+        "open_time": []
+      },
+      "recommend": "0",
+      "discount_num": "0",
+      "gridcode": "4603170721",
+      "shopinfo": "2",
+      "alias": [],
+      "event": [],
+      "indoor_map": "0",
+      "email": [],
+      "timestamp": "2026-09-02 12:40:38",
+      "website": [],
+      "address": "2号线;6号线",
+      "space_num": [],
+      "match": "0",
+      "indoor_data": {
+        "cmsid": [],
+        "truefloor": [],
+        "cpid": [],
+        "floor": []
+      },
+      "exit_location": [],
+      "location": "103.969815,30.757706",
+      "groupbuy_num": "0",
+      "featured_reviews": []
+    },
+    {
+      "parent": [],
+      "pcode": "510000",
+      "keytag": "4A景区",
+      "type": "科教文化服务;博物馆;博物馆",
+      "photos": [
+        {
+          "title": [],
+          "url": "http://store.is.autonavi.com/showpic/2a74b5da7192e4628a9bdcc368e002ac"
+        },
+        {
+          "title": [],
+          "url": "http://store.is.autonavi.com/showpic/96a6372e5faa32096847b76b5a59af7c"
+        },
+        {
+          "title": [],
+          "url": "http://store.is.autonavi.com/showpic/d60e252c0c13b260465aeba6b146c832"
+        }
+      ],
+      "building": [],
+      "typecode": "140100",
+      "poiweight": [],
+      "citycode": "028",
+      "adname": "武侯区",
+      "children": [],
+      "featured_reviews_remake": [],
+      "tel": "028-85535951",
+      "id": "B001C07VJ2",
+      "tag": [],
+      "entr_location": "104.0473,30.644339",
+      "adcode": "510107",
+      "pname": "四川省",
+      "biz_type": [],
+      "cityname": "成都市",
+      "postcode": [],
+      "business_area": "高升桥",
+      "childtype": [],
+      "atag": [],
+      "name": "成都武侯祠博物馆",
+      "shopid": [],
+      "favorite_num": [],
+      "navi_poiid": "H48F017017_407375;17067",
+      "distance": [],
+      "importance": [],
+      "biz_ext": {
+        "cost": [],
+        "opentime2": "周一至周日 08:30-18:30 最晚进入17:30",
+        "rating": "4.8",
+        "open_time": "08:30-18:30"
+      },
+      "recommend": "0",
+      "discount_num": "0",
+      "gridcode": "4504707312",
+      "shopinfo": "0",
+      "alias": "武侯祠|武侯祠景区",
+      "event": [],
+      "indoor_map": "0",
+      "email": [],
+      "timestamp": "2026-09-15 21:45:33",
+      "website": "www.wuhouci.net.cn",
+      "address": "武侯祠大街231号",
+      "space_num": [],
+      "match": "0",
+      "indoor_data": {
+        "cmsid": [],
+        "truefloor": [],
+        "cpid": [],
+        "floor": []
+      },
+      "exit_location": [],
+      "location": "104.047992,30.646168",
+      "groupbuy_num": "0",
+      "featured_reviews": []
+    }
+  ]
+}

@@ -1,0 +1,87 @@
+{
+  "suggestion": {
+    "keywords": [],
+    "cities": []
+  },
+  "count": "600",
+  "infocode": "10000",
+  "pois": [
+    {
+      "parent": "B001C7WG43",
+      "pcode": "510000",
+      "keytag": "串串香",
+      "type": "餐饮服务;中餐厅;中餐厅",
+      "photos": [
+        {
+          "title": [],
+          "url": "https://store.is.autonavi.com/showpic/5f1a028787188d69cd0028c97dc71863"
+        },
+        {
+          "title": [],
+          "url": "https://store.is.autonavi.com/showpic/48adb931ee5c958f0000003123060871?type=pic"
+        },
+        {
+          "title": [],
+          "url": "https://store.is.autonavi.com/showpic/387ffc6443ad173c0000006006510195?type=pic"
+        }
+      ],
+      "building": [],
+      "typecode": "050100",
+      "poiweight": [],
+      "citycode": "028",
+      "adname": "锦江区",
+      "children": [],
+      "featured_reviews_remake": [],
+      "tel": "18123356772",
+      "id": "B0LATS7BTE",
+      "tag": "特色菜,串串,牛肉",
+      "entr_location": "104.077595,30.651205",
+      "adcode": "510104",
+      "pname": "四川省",
+      "biz_type": "diner",
+      "cityname": "成都市",
+      "postcode": [],
+      "business_area": "东大街",
+      "childtype": "202",
+      "atag": "特色菜,串串,牛肉",
+      "name": "龙户人家串串香火锅(春熙路店)",
+      "shopid": [],
+      "favorite_num": [],
+      "navi_poiid": [],
+      "distance": [],
+      "importance": [],
+      "biz_ext": {
+        "cost": "73.00",
+        "opentime2": "周一至周日 11:00-02:00",
+        "rating": "4.7",
+        "open_time": "11:00-02:00",
+        "meal_ordering": "0"
+      },
+      "recommend": "0",
+      "discount_num": "0",
+      "gridcode": "4504708600",
+      "shopinfo": "0",
+      "alias": [],
+      "event": [],
+      "indoor_map": "0",
+      "email": [],
+      "timestamp": "2026-09-11 09:45:49",
+      "website": [],
+      "address": "红星路四段265号附1号",
+      "space_num": [],
+      "match": "0",
+      "indoor_data": {
+        "cmsid": [],
+        "truefloor": [],
+        "cpid": [],
+        "floor": []
+      },
+      "exit_location": [],
+      "location": "104.077761,30.651100",
+      "groupbuy_num": "0",
+      "featured_reviews": []
+    }
+  ],
+  "status": "1",
+  "info": "OK"
+}

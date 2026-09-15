@@ -36,6 +36,7 @@ if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
 from app.graph.graph import build_runtime, initial_state, build_graph, RECURSION_LIMIT  # noqa: E402
+from app.schemas import WeatherStatus  # noqa: E402
 
 _LINE = "─" * 68
 
@@ -128,9 +129,12 @@ def print_result(state: dict) -> None:
         for day in trip["days"]:
             weather = day.get("weather") or {}
             w = ""
-            if weather.get("status") == "available":
+            # ⚠️ 状态字面量是 `"ok"` 不是 `"available"`（`WeatherStatus.OK = "ok"`）。
+            #    这里写错过一次，后果是**永远显示"天气无法判定"** —— 一个不报错的静默错误。
+            #    所以断言取值一律从枚举来，不要手抄字面量。
+            if weather.get("status") == WeatherStatus.OK:
                 w = f"｜{weather.get('day_weather')} {weather.get('day_temp')}~{weather.get('night_temp')}℃"
-            elif weather.get("status") == "unavailable":
+            elif weather.get("status") == WeatherStatus.UNAVAILABLE:
                 w = f"｜天气无法判定（{weather.get('note')}）"
             stats = day.get("day_stats") or {}
             print(

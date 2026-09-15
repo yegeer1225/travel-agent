@@ -1,0 +1,103 @@
+{
+  "suggestion": {
+    "keywords": [],
+    "cities": []
+  },
+  "count": "3",
+  "infocode": "10000",
+  "pois": [
+    {
+      "parent": "B001C7USWT",
+      "distance": [],
+      "keytag": "茶座",
+      "importance": [],
+      "biz_ext": {
+        "cost": "29.00",
+        "opentime2": "周一至周日 09:00-20:00",
+        "rating": "4.3",
+        "open_time": "09:00-20:00",
+        "meal_ordering": "0"
+      },
+      "type": "餐饮服务;冷饮店;冷饮店",
+      "photos": [
+        {
+          "title": [],
+          "url": "https://aos-comment.amap.com/B0KDU7DY4N/comment/d9f9975204e66ce3558e407abeccea07_2048_2048_80.jpg"
+        },
+        {
+          "title": [],
+          "url": "https://aos-comment.amap.com/B0KDU7DY4N/comment/e56fd7fff148b4e5c90f888a513a0799_2048_2048_80.jpg"
+        },
+        {
+          "title": [],
+          "url": "https://aos-comment.amap.com/B0KDU7DY4N/comment/8c59f4619f6a9bf89bf5fd08381c513a_2048_2048_80.jpg"
+        }
+      ],
+      "building": [],
+      "typecode": "050700",
+      "shopinfo": "1",
+      "poiweight": [],
+      "adname": "武侯区",
+      "featured_reviews_remake": [],
+      "tel": "13980801167;18884051167",
+      "id": "B0KDU7DY4N",
+      "address": "维信街1号附20号21号",
+      "space_num": [],
+      "pname": "四川省",
+      "biz_type": "diner",
+      "cityname": "成都市",
+      "childtype": "320",
+      "atag": [],
+      "name": "不存在茶铺",
+      "location": "104.043430,30.634938",
+      "shopid": [],
+      "favorite_num": [],
+      "featured_reviews": []
+    },
+    {
+      "parent": "B0FFL4YJ97",
+      "distance": [],
+      "keytag": "服装店",
+      "importance": [],
+      "biz_ext": {
+        "cost": [],
+        "opentime2": "周一至周日 09:00-21:30",
+        "rating": "2.5",
+        "open_time": "09:00-21:30"
+      },
+      "type": "购物服务;服装鞋帽皮具店;服装鞋帽皮具店",
+      "photos": [
+        {
+          "title": [],
+          "url": "http://store.is.autonavi.com/showpic/f55a3bd0fb8ebb1317efcf0f87ef73e6"
+        },
+        {
+          "title": [],
+          "url": "http://store.is.autonavi.com/showpic/e48354be437f100008436fb2f4b97217"
+        }
+      ],
+      "building": [],
+      "typecode": "061100",
+      "shopinfo": "0",
+      "poiweight": [],
+      "adname": "温江区",
+      "featured_reviews_remake": [],
+      "tel": "13880952809",
+      "id": "B0K2DHA6SV",
+      "address": "花土路1519号12栋附215号",
+      "space_num": [],
+      "pname": "四川省",
+      "biz_type": [],
+      "cityname": "成都市",
+      "childtype": "320",
+      "atag": [],
+      "name": "XYZ穿啥哟童装&女装集合店",
+      "location": "103.888589,30.672110",
+      "shopid": [],
+      "favorite_num": [],
+      "featured_reviews": []
+    }
+  ],
+  "status": "1",
+  "info": "OK"
+}
