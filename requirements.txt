@@ -1,14 +1,62 @@
-# ---- 核心：LangGraph 手写 agent loop ----
-langgraph>=1.2,<2
-langchain-core>=1.0,<2
+# ============================================================================
+# 运行依赖 —— 版本按 2026-09-15 实际跑通的组合锁定
+#
+# 安装：      .venv/Scripts/python.exe -m pip install -r requirements.txt
+# 国内加速：  追加 -i https://pypi.tuna.tsinghua.edu.cn/simple --no-cache-dir
+#            （--no-cache-dir 是为了不往 C 盘写 pip 缓存）
+# ============================================================================
 
-# ---- LLM 接入（OpenAI 兼容层，换供应商只改 .env）----
-langchain-openai>=1.0,<2
+# --- Agent 内核 -------------------------------------------------------------
+#
+# 🔴 这三个必须写死版本，不要改回 >= 或去掉版本号。
+#
+#    原因：langgraph-checkpoint-mysql 是【第三方包】（单人维护，非 langchain-ai 官方），
+#    它声明的依赖是 `langgraph-checkpoint>=2.1.2` —— **没有上界**。
+#    对比两个官方包：langgraph-checkpoint-sqlite / -postgres 都写死 `<5.0.0,>=4.1.0`。
+#    无上界的后果：pip 在任何升级场景下都认为"满足"，**不会拦任何不兼容**，
+#    坏了也只能等运行时报错才发现（而且往往报在 M5 跑图的时候）。
+#
+#    改这三个版本之前，先跑兼容性探针（30 秒出结论）：
+#        cd backend && ../.venv/Scripts/python.exe scripts/check_checkpoint_mysql.py
+langgraph==1.2.11
+langgraph-checkpoint==4.2.0
+langgraph-checkpoint-mysql==3.0.0
 
-# ---- 配置与 HTTP ----
-python-dotenv>=1.0
-httpx>=0.27
-pydantic>=2.0
+# --- MySQL 驱动 -------------------------------------------------------------
+# 两个都要：PyMySQL 走同步（建表 / 脚本 / 评测），aiomysql 走异步（FastAPI 里用）。
+# 连接串前缀不一样，写错了连不上：
+#     mysql://           → PyMySQLSaver
+#     mysql+aiomysql://  → AIOMySQLSaver
+PyMySQL==1.2.0
+aiomysql==0.3.2
 
-# ---- 测试 ----
-pytest>=8.0
+# --- LLM --------------------------------------------------------------------
+# ⚠️ langchain-openai 会剥掉 DeepSeek 的 reasoning_content 字段，
+#    带 tools 的请求必须关思考（LLM_THINKING_TOOL=disabled），详见 .env 里的注释。
+langchain-core==1.6.3
+langchain-openai==1.6.2
+
+# --- 数据契约 ---------------------------------------------------------------
+# schemas.py 是三方共用的事实源，docs/types.ts 由它自动生成。
+# 动 pydantic 大版本前先重跑：
+#     python backend/scripts/gen_ts_types.py && tsc --noEmit docs/types.ts
+pydantic==2.13.5
+
+# --- 配置与 HTTP ------------------------------------------------------------
+# httpx 供高德 Web 服务工具使用（M2 起真正用到；M1 走 mock 不受影响）
+python-dotenv==1.2.3
+httpx==0.28.1
+
+# --- 测试 -------------------------------------------------------------------
+# backend/tests/ 只测纯逻辑，**不连数据库**。
+# 需要起库才能跑的检查一律放 backend/scripts/（先例：check_checkpoint_mysql.py）
+pytest==9.1.1
+
+
+# ============================================================================
+# 以下到对应里程碑再装 —— 现在的版本号我还没验证过，先不写进来（避免假装验证过）
+#
+# M4（HTTP 接口层）：fastapi / uvicorn / python-multipart
+# M9（鉴权）：bcrypt / pyjwt
+# M2（前端地图）：不是 Python 包，是前端 npm 依赖，见 界面设计.md 第一节
+# ============================================================================

@@ -1,0 +1,73 @@
+# 只起数据库，应用本身不容器化（本地开发时后端直接跑 venv，改代码不用重建镜像）
+#
+# 用法：
+#   docker compose up -d          起库
+#   docker compose ps             看健康状态（要等 healthy 再连）
+#   docker compose logs -f mysql  看日志
+#   docker compose down           停库（数据在 named volume 里，不会丢）
+#   docker compose down -v        ⚠️ 连数据一起删，重新初始化
+#
+# ⚠️ 所有密码都从同目录的 .env 读，不写在本文件里（.env 不入库）。
+#    改密码的正确姿势：改 .env 里的 MYSQL_PASSWORD → docker compose down -v → up -d
+#    （只改 .env 不删 volume 是无效的：MySQL 只在【数据目录为空】时才用环境变量初始化账号）
+#
+# ⚠️ 不映射 3307/3308 那些端口，避免和本机其它项目的 MySQL 容器打架
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: travel-mysql
+    restart: unless-stopped
+
+    # ⚠️ 这两行不是随便挑的，改之前先读完：
+    #
+    # 1) utf8mb4 必须在【建库之前】指定，否则中文和 emoji 存进去就是问号。
+    #
+    # 2) collation 必须写 utf8mb4_0900_ai_ci —— 它和驱动强制的连接排序规则对齐。
+    #    链路是这样的：PyMySQL / aiomysql 的 charset='utf8mb4' 会在握手后发
+    #    `SET NAMES utf8mb4`，服务端把 `collation_connection` 设成【该字符集的默认
+    #    排序规则】（MySQL 8 = utf8mb4_0900_ai_ci），**跟 collation_server 无关**。
+    #    所以如果这里写 utf8mb4_unicode_ci，就会出现：
+    #        表里的列 = utf8mb4_unicode_ci（继承 collation_server）
+    #        连接字面量 = utf8mb4_0900_ai_ci（SET NAMES 决定）
+    #    两者在一个查询里相遇 -> 报错 1267：
+    #        Illegal mix of collations (utf8mb4_unicode_ci,IMPLICIT)
+    #                             and (utf8mb4_0900_ai_ci,IMPLICIT) for operation '='
+    #    这个坑实测踩过（backend/scripts/check_checkpoint_mysql.py），代价是一个下午。
+    #
+    #    👉 自建业务表的 DDL 请统一写：DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+    #       别只写 CHARSET=utf8mb4 就以为完事了。
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-time-zone=+08:00
+
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请在 .env 里设置 MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DB:-travel_agent}
+      MYSQL_USER: ${MYSQL_USER:-travel}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?请在 .env 里设置 MYSQL_PASSWORD}
+      TZ: Asia/Shanghai
+
+    ports:
+      - "127.0.0.1:${MYSQL_PORT:-3306}:3306"
+
+    volumes:
+      - travel_mysql_data:/var/lib/mysql
+
+    # 健康检查存在的意义：`docker compose up -d` 返回 ≠ 数据库可连，
+    # MySQL 首次初始化要跑十几秒。脚本里一定要等 healthy 再连，别用 sleep 猜。
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mysqladmin ping -h 127.0.0.1 -u root -p$$MYSQL_ROOT_PASSWORD --silent",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+volumes:
+  travel_mysql_data:
+    name: travel_mysql_data
