@@ -8,19 +8,19 @@
       "origin_id": "1",
       "dest_id": "1",
       "distance": "64346",
-      "duration": "5303"
+      "duration": "5317"
     },
     {
       "origin_id": "2",
       "dest_id": "1",
       "distance": "77740",
-      "duration": "4920"
+      "duration": "4895"
     },
     {
       "origin_id": "3",
       "dest_id": "1",
       "distance": "65935",
-      "duration": "4652"
+      "duration": "4634"
     }
   ]
 }

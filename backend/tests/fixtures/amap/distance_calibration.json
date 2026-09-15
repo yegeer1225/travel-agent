@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "label": "市区内 武侯祠→宽窄巷子",
+      "straight_km": 2.03,
+      "km": 4.4,
+      "minutes": 24,
+      "road_factor": 2.179,
+      "speed_kmh": 11.2
+    },
+    {
+      "label": "近郊   人民公园→熊猫基地",
+      "straight_km": 12.07,
+      "km": 20.4,
+      "minutes": 44,
+      "road_factor": 1.689,
+      "speed_kmh": 28.0
+    },
+    {
+      "label": "远郊   武侯祠→都江堰",
+      "straight_km": 57.64,
+      "km": 63.9,
+      "minutes": 75,
+      "road_factor": 1.108,
+      "speed_kmh": 50.9
+    },
+    {
+      "label": "远郊   武侯祠→青城山",
+      "straight_km": 54.44,
+      "km": 64.3,
+      "minutes": 89,
+      "road_factor": 1.182,
+      "speed_kmh": 43.6
+    }
+  ]
+}

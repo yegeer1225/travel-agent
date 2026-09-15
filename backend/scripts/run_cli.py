@@ -40,6 +40,24 @@ from app.schemas import WeatherStatus  # noqa: E402
 
 _LINE = "─" * 68
 
+_CHECK_ICON = {"pass": "✅", "fail": "🔴", "unknown": "⚪"}
+
+
+def _fmt_checks(checks: list[dict]) -> str:
+    """判据打成一串 `poi_exists✅ open_today⚪`。
+
+    ⚠️ `unknown` 必须有**自己的图标**（⚪）—— 它既不是"通过"也不是"失败"。
+       显示成绿色是撒谎，显示成红色是误报。M3 一半的工作量就在这个第三态上。
+    """
+    return "  ".join(f"{c.get('code')}{_CHECK_ICON.get(c.get('status'), '?')}" for c in checks)
+
+
+def _print_issues(checks: list[dict], indent: str = "       ") -> None:
+    """把非 pass 的判据逐条印出来。pass 不印 —— 印了会把输出淹掉。"""
+    for chk in checks:
+        if chk.get("status") != "pass" and chk.get("msg"):
+            print(f"{indent}↳ [{chk.get('status')}] {chk['msg']}")
+
 
 def _fmt_stop(stop: dict) -> str:
     """打印一站。**
@@ -77,15 +95,10 @@ def _fmt_stop(stop: dict) -> str:
     if stop.get("match_reason"):
         lines.append(f"     为什么：{stop['match_reason']}")
 
-    marks = []
-    for chk in stop.get("checks") or []:
-        icon = {"pass": "✅", "fail": "🔴", "unknown": "⚪"}.get(chk.get("status"), "?")
-        marks.append(f"{chk.get('code')}{icon}")
+    marks = _fmt_checks(stop.get("checks") or [])
     if marks:
-        lines.append("     判据：" + "  ".join(marks))
-        for chk in stop.get("checks") or []:
-            if chk.get("status") != "pass" and chk.get("msg"):
-                lines.append(f"       ↳ {chk['msg']}")
+        lines.append("     判据：" + marks)
+        _print_issues(stop.get("checks") or [])
     return "\n".join(lines)
 
 
@@ -142,8 +155,29 @@ def print_result(state: dict) -> None:
                 f"\n     当日 {stats.get('distance_km')} km / 车程 {stats.get('drive_min')} 分钟"
                 f" / 步行约 {stats.get('walk_km')} km（估算）"
             )
+            # 天级判据（`weather_conflict` / 当天车程 / 走路量）—— 主语是"这一天"，
+            # 所以印在天的标题下，不印在某个站上（挂到站上会让同一条错误重复 N 次）。
+            if day.get("checks"):
+                print(f"     当天判据：{_fmt_checks(day['checks'])}")
+                _print_issues(day["checks"], indent="       ")
             for stop in day.get("stops") or []:
                 print(_fmt_stop(stop))
+
+        # ── 三态里最容易被忽略的那一态：单独列一遍 ──
+        # 这些判据**既不算通过也不算失败**，看"硬错 0"会以为全都验过了。
+        unknown: list[tuple[str, dict]] = []
+        for day in trip["days"]:
+            for chk in day.get("checks") or []:
+                if chk.get("status") == "unknown":
+                    unknown.append((f"第{day['day']}天", chk))
+            for stop in day.get("stops") or []:
+                for chk in stop.get("checks") or []:
+                    if chk.get("status") == "unknown":
+                        unknown.append((f"第{day['day']}天 {stop['name']}", chk))
+        if unknown:
+            print(f"\n【无法判定（{len(unknown)} 条）—— 数据拿不到，**不算通过**】")
+            for where, chk in unknown:
+                print(f"    ⚪ {where}｜{chk.get('code')}：{chk.get('msg')}")
 
         validation = trip.get("validation") or {}
         if validation.get("remaining"):

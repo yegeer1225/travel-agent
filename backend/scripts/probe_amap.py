@@ -219,6 +219,52 @@ def check_distance(key: str) -> None:
         mins = int(res.get("duration") or 0) / 60
         print(f"      origin_id={res.get('origin_id')} → {km:.1f} km / {mins:.0f} min")
 
+    # ── 校准 mock 的距离模型 ──
+    # mock 用 `直线 × _ROAD_FACTOR ÷ _AVG_SPEED_KMH` 估车程，那两个常量原本是
+    # **没实测依据时的猜测值**。而 `reachable` 判据直接依赖车程 ——
+    # 常量偏了，mock 下的判据就会比真实更严或更松，**把真问题盖住**。
+    #
+    # ⚠️ 样本必须**覆盖不同距离段**：市区内短途在红绿灯里磨，远郊走高速，
+    #    平均速度能差一倍。只测一条就定常量，等于拿远郊的速度去算市区。
+    print("\n  [校准样本] 市区内 / 近郊 / 远郊 三段：")
+    print(f"      {'样本':<26}{'直线 km':>9}{'驾车 km':>10}{'分钟':>7}{'路网系数':>10}{'均速 km/h':>11}")
+    from app.providers.amap import _haversine_km  # 复用同一套公式，别在这里再写一遍
+
+    calibrations: list[dict[str, Any]] = []
+    cases = [
+        ("市区内 武侯祠→宽窄巷子", "104.047992,30.646168", (104.053307, 30.663869)),
+        ("近郊   人民公园→熊猫基地", "104.057641,30.656990", (104.138176, 30.740573)),
+        ("远郊   武侯祠→都江堰", "104.047992,30.646168", (103.610529, 31.003363)),
+        ("远郊   武侯祠→青城山", "104.047992,30.646168", (103.563817, 30.904400)),
+    ]
+    for label, origin, dest_coord in cases:
+        dest = f"{dest_coord[0]},{dest_coord[1]}"
+        r = _get(key, "/v3/distance", origins=origin, destination=dest, type="1")
+        res = (r.get("results") or [{}])[0]
+        meters = int(res.get("distance") or 0)
+        seconds = int(res.get("duration") or 0)
+        if not meters:
+            print(f"      {label:<26}  没拿到结果")
+            continue
+        o_lng, o_lat = (float(x) for x in origin.split(","))
+        straight = _haversine_km((o_lng, o_lat), dest_coord)
+        km = meters / 1000
+        minutes = seconds / 60
+        row = {
+            "label": label.strip(),
+            "straight_km": round(straight, 2),
+            "km": round(km, 1),
+            "minutes": round(minutes),
+            "road_factor": round(km / straight, 3),
+            "speed_kmh": round(km / (minutes / 60), 1),
+        }
+        calibrations.append(row)
+        print(f"      {label:<26}{straight:>9.1f}{km:>10.1f}{minutes:>7.0f}"
+              f"{row['road_factor']:>10.3f}{row['speed_kmh']:>11.1f}")
+    _save("distance_calibration.json", {"cases": calibrations})
+    print("  ⭐ 用法：`_ROAD_FACTOR` 取路网系数的中位数；`_AVG_SPEED_KMH` 按**距离段**加权，")
+    print("     不要拿远郊的均速去算市区 —— 两者能差一倍。")
+
 
 # ══════════════════════════════════════════════════════════════
 #  ⑥ 分类别抽样 —— 最容易漏的一步
@@ -310,11 +356,68 @@ def check_rate_limit(key: str) -> None:
 
 
 # ══════════════════════════════════════════════════════════════
+#  ⑨ 补齐 mock 池的字段真值
+# ══════════════════════════════════════════════════════════════
+
+
+def collect_mock_pool_fields(key: str) -> None:
+    """采集 `mock.py` 里那 9 个 POI 的 `type` / `typecode` **实测真值**。
+
+    **为什么需要单独采一次**：D34 当时不敢给 mock 的 POI 填 `type`，理由是
+    "只知道格式、不知道这 9 个 POI 的真实值，填了就是编造"。现在有探针了 ——
+    真值能拿到，就该补上。不补的后果很具体：`weather_conflict` 判据要读 `type`
+    判"户外还是室内"，而 mock 下 `type` 恒为 `None` → 那条判据**永远走不到**，
+    连测试都写不出来。
+
+    **池子直接从 `mock.py` 导入**，不在这里复制一份名单 —— 复制就会不同步，
+    而不同步**不报错**（坑 21）。
+    """
+    from app.providers.mock import MOCK_POI_POOL
+
+    print("\n" + "═" * 78)
+    print("⑨ 采集 mock 池 9 个 POI 的 type / typecode（实测真值）")
+    print("═" * 78)
+    print("  ⚠️ 按 **poi_id 精确匹配**，不靠名字 —— 「人民公园」全国有很多个。\n")
+
+    results: list[dict[str, Any]] = []
+    for poi in MOCK_POI_POOL:
+        r = _get(key, "/v3/place/text", keywords=poi.name, city="成都", offset=10, extensions="all")
+        hit = next((p for p in (r.get("pois") or []) if p.get("id") == poi.poi_id), None)
+        if hit is None:
+            print(f"  ❌ {poi.name[:24]:<26} [{poi.poi_id}] 没搜到同一个 id")
+            print(f"      （返回的前 3 个 id：{[p.get('id') for p in (r.get('pois') or [])[:3]]}）")
+            continue
+        b = hit.get("biz_ext") or {}
+        results.append({
+            "poi_id": poi.poi_id,
+            "name": poi.name,
+            "type": (hit.get("type") or None),
+            "typecode": (hit.get("typecode") or None),
+            "open_time": (b.get("open_time") or None),
+            "rating": (b.get("rating") or None),
+        })
+        print(f"  ✅ {poi.name[:24]:<26} type={hit.get('type')!r}")
+        print(f"     {'':24} typecode={hit.get('typecode')!r}")
+
+    _save("mock_pool_types.json", {"collected_at": "probe", "items": results})
+
+    print("\n  ↓↓↓ 直接贴进 `app/providers/mock.py`（每条的 `type` / `typecode`）↓↓↓")
+    for row in results:
+        print(f'        type={row["type"]!r},')
+        print(f'        typecode={row["typecode"]!r},   # {row["name"]}')
+
+
+# ══════════════════════════════════════════════════════════════
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="高德 Web 服务实测探针")
     parser.add_argument("--no-limit", action="store_true", help="跳过限流探测（不触发连续失败）")
+    parser.add_argument(
+        "--collect-mock",
+        action="store_true",
+        help="额外采集 mock 池 9 个 POI 的 type/typecode（+9 次请求，平时用不到）",
+    )
     args = parser.parse_args()
 
     print("高德 Web 服务实测探针")
@@ -334,6 +437,8 @@ def main() -> int:
     check_search_behaviour(key)
     if not args.no_limit:
         check_rate_limit(key)
+    if args.collect_mock:
+        collect_mock_pool_fields(key)
 
     print("\n" + "═" * 78)
     print(f"完成：共 {_call_count} 次请求｜样本存到 {FIXTURE_DIR}")

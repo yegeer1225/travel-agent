@@ -42,6 +42,8 @@ from datetime import date, timedelta
 
 from app.graph.graph import RECURSION_LIMIT, build_graph, initial_state
 from app.graph.nodes import FORCE_STOP_TEXT, TOOL_BUDGET_TEXT
+from app.providers.base import DistanceResult
+from app.providers.mock import MockAmapProvider
 from fakes import (
     POI_IDS,
     ai_multi_tool_calls,
@@ -422,6 +424,77 @@ def test_degraded_trip_keeps_only_valid_stops():
 
     all_ids = [stop["poi_id"] for day in state["trip"]["days"] for stop in day["stops"]]
     assert FAKE_ID not in all_ids
+
+
+# ── M3：`validate.py` 产生的硬错也要能驱动打回 ────────────────
+#
+# 上面三条用的是"编造的 poi_id" —— 那是 `assemble_trip` 阶段拦下的（`assemble_blocking`）。
+# 但 M3 新加的 5 条判据走的是**另一条通道**（`report.blocking`）。
+# 两条通道最后都拼进 `blocking` 交给条件边，**但没人验证过第二条真的通**。
+#
+# 这一条就是那个验证：让距离永远超限，于是每一轮都被 `reachable` 判成硬错，
+# 打满 2 轮后降级输出。它同时钉住三件事：
+#   ① `report.blocking` 能进打回理由（不是只写进 trip 就完了）
+#   ② 打回上限对**所有**硬错一视同仁，不分类别
+#   ③ 数据层面的问题（距离就是那么远）修不好时，循环**会停**，不会死转
+
+
+class _FarProvider(MockAmapProvider):
+    """距离永远 200 分钟的假 provider。
+
+    ⚠️ **不改 `MockAmapProvider.calc_distance`**：那个实现是 2026-09-15
+       实测校准过的（三段路网系数）。为了造失败场景去改它，
+       等于让"校准"这件事失效 —— 以后真数据变了，没人分得清
+       是模型偏差还是有人在测试里动过手。需要极端值时在**测试里**覆盖。
+    """
+
+    async def calc_distance(self, origin, dest):  # type: ignore[override]
+        return DistanceResult(km=200.0, drive_min=200, straight_km=150.0)
+
+
+def test_validation_hard_error_drives_the_repair_loop():
+    """🔴 `validate.py` 的硬错必须**真的能打回**，且打满上限就收手。
+
+    构造：一个距离永远 200 分钟的 provider。草稿里的 poi_id 全是真 id
+    （所以 `assemble_trip` 一条都拦不住），但它排的每一跳车程都超限 ——
+    **所有硬错都来自 M3 的判据**。
+
+    期望：`check_rounds` 停在 2（不是 0，也不是无限），
+    并且降级输出里如实列出剩余风险。
+    """
+    nodes = _nodes(
+        provider=_FarProvider(today=TODAY),
+        extract_script=_intent(),
+        tool_script=[_search_all(), ai_text("信息够了")],
+        # 一直给同一份"id 全真但路线很赶"的草稿 —— 脚本用完会重复最后一条
+        plan_script=[ai_text(_draft(*POI_IDS[:3], days=2))],
+    )
+    state = run(_run("去成都", nodes=nodes))
+
+    assert state["check_rounds"] == 2, "M3 的硬错必须能触发打回，且打到上限就停"
+    remaining = state["validation"]["remaining"]
+    assert remaining, "修不好就如实列出来"
+    assert all("reachable" in item["code"] for item in remaining), (
+        f"剩余风险该全是车程类：{remaining}"
+    )
+    assert state["trip"] is not None, "降级也要给用户一份行程"
+    assert state["trip"]["summary"]["hard_errors"] == len(remaining)
+    assert nodes.llm_plan.call_count == 3, "初次 + 2 次重排，没有第 4 次"
+
+
+def test_validation_hard_error_message_reaches_the_model():
+    """打回理由要**真的进 prompt** —— 否则模型重排时不知道该改什么，纯浪费钱。"""
+    nodes = _nodes(
+        provider=_FarProvider(today=TODAY),
+        extract_script=_intent(),
+        tool_script=[_search_all(), ai_text("信息够了")],
+        plan_script=[ai_text(_draft(*POI_IDS[:3], days=2))],
+    )
+    run(_run("去成都", nodes=nodes))
+
+    prompt = nodes.llm_plan.joined_prompts()
+    assert "分钟" in prompt, "打回理由里必须带上具体耗时数字"
+    assert "超过" in prompt, "要说清是超了阈值，不然模型只能瞎猜"
 
 
 # ══════════════════════════════════════════════════════════════

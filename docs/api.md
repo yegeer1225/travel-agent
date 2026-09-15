@@ -257,7 +257,12 @@ Authorization: Bearer <token>
 **一次提交、一次重算、一次替换**，界面上永远看不到中间态。
 
 **重算什么**（全部确定性，**不调 LLM**）：
-`from_prev_km` / `from_prev_drive_min` / `arrive` / `leave` / `day_stats` / `summary` / 硬判据 `checks`。
+`from_prev_km` / `from_prev_drive_min` / `arrive` / `leave` / `day_stats` / `summary` /
+硬判据 `checks`（**`Stop.checks` 和 `Day.checks` 都要重算** —— 见 4.1）。
+
+⚠️ **判据重算必须幂等**：后端每次都会**先清空再重填**。
+不清的话，同一份行程校验两次 → 每个判据出现两遍 → 前端满屏重复红标，
+而这个 bug **只在"重算"路径上出现**（首次生成看不出来），前端要能据此报 bug 而不是自己 dedupe。
 
 **不重算什么**：`match_reason`（LLM 生成的，重算要钱，保留原文）、`Day.weather`（跟顺序无关）。
 
@@ -480,10 +485,24 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 🔴 **`unknown` 绝不允许显示成绿色通过的样子。** 这是这个项目最值钱的可视化 ——
 面试官会专门问"你怎么区分'确认不对'和'不知道对不对'"。
-（典型真实场景：青城山的 `biz_ext` 里没有 `open_time` → `open_today` 只能 `unknown`）
+（典型真实场景：青城山的 `biz_ext` 里没有 `open_time` → `open_today` 只能 `unknown`。
+**2026-09-16 真跑 3 天行程就出了 1 条**，这不是边角情况。）
 
 ⚠️ 三态色**必须用独立变量**，不许复用装饰色板 —— 装饰绿 `#6BCB77` 和通过绿 `#16A34A` 是同一色感区间，
 将来改品牌色会把三态一起毁掉。
+
+#### 判据挂在**两个层级**上（D37）
+
+| 挂在哪 | 字段 | 判据的**主语** | 例子 |
+|---|---|---|---|
+| `Stop.checks` | 站级 | "这一站" | `poi_exists` / `open_today` / `reachable`（距上一站） |
+| `Day.checks` | 天级 | "**这一天**" | `weather_conflict`（暴雨撞户外景点）/ `walk_load`（当天累计走路量）/ 当天累计车程 |
+
+前端渲染时**别混**：天级判据显示在**当天卡片的头部**（跟"当日 4.0 km / 车程 26 分钟"同一行），
+站级判据显示在**站点行后面**。
+⚠️ 同一个 `code` 会在两处出现（`reachable` 既有"这一跳到得了吗"也有"这一天开太多了"），
+**靠挂载位置区分，不要靠 `code` 去重** —— 去重会把其中一条真判据吃掉。
+三态说明一律读 `msg`（后端给好了人话），前端不做文案分支。
 
 ### 4.2 没有来源的字段一律不显示
 

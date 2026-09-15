@@ -50,9 +50,6 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.providers.base import AmapProvider
 from app.schemas import (
-    Check,
-    CheckLevel,
-    CheckStatus,
     CoordSys,
     Day,
     DayStats,
@@ -63,6 +60,11 @@ from app.schemas import (
     WeatherStatus,
 )
 from app.tools.poi_pool import PoiPool
+
+# 判据的**定义**在 `validate.py`（M3 迁过去的）。
+# 这里只用到 `poi_exists` 一条 —— 因为组装时刚好手里就有池子和 id，顺手判了；
+# 其余 4 条要等整份 `Trip` 成型（trip 级/天级），由 `check_plan` 统一跑 `validate_trip`。
+from app.graph.validate import check_poi_exists
 
 # ══════════════════════════════════════════════════════════════
 #  模型输出结构 —— 刻意保持极小
@@ -185,22 +187,6 @@ def _add_minutes(hhmm: str, minutes: int) -> str:
     return f"{total // 60:02d}:{total % 60:02d}"
 
 
-def _check_poi_exists(poi_id: str, pool: PoiPool) -> Check:
-    """M1 唯一的硬判据：这个 POI 是不是工具真的返回过。
-
-    **M3 会把 9 类判据补齐**（硬 5 + 软 4）。M1 先只做这一条，
-    因为它是"封闭世界"的**唯一必要条件**，也是整条可信度链路的锚点。
-    """
-    if pool.contains(poi_id):
-        return Check(level=CheckLevel.HARD, code="poi_exists", status=CheckStatus.PASSED)
-    return Check(
-        level=CheckLevel.HARD,
-        code="poi_exists",
-        status=CheckStatus.FAILED,
-        msg=f"POI id `{poi_id}` 不在候选池里 —— 这个地点不是工具搜出来的",
-    )
-
-
 async def assemble_trip(
     draft: PlanDraft,
     pool: PoiPool,
@@ -273,7 +259,11 @@ async def assemble_trip(
                     rating=poi.rating,
                     open_time=poi.open_time,
                     match_reason=draft_stop.match_reason,
-                    checks=[_check_poi_exists(poi.poi_id, pool)],
+                    # 只填 `poi_exists` —— 组装时手里刚好有池子和 id。
+                    # 其余 4 条要等整份 Trip 成型（天级/相邻站级），由 `check_plan`
+                    # 调 `validate_trip` 统一跑并**清空重填**（所以这里即使填了也会被覆盖，
+                    # 填它只是让 `assemble_trip` 单独被调用时也有一份能看的 checks）。
+                    checks=[check_poi_exists(poi.poi_id, pool)],
                 )
             )
             day_km += km

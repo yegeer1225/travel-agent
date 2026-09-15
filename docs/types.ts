@@ -122,6 +122,7 @@ export interface Day {
   weather: Weather | null
   stops: Stop[]
   day_stats: DayStats | null
+  checks: Check[]
 }
 
 export interface TripSummary {

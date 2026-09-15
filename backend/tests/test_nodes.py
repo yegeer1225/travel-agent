@@ -41,6 +41,7 @@ from app.graph.nodes import (
     MAX_TOOL_CALLS,
     TOOL_BUDGET_TEXT,
 )
+from app.providers.base import DistanceResult
 from app.providers.mock import MockAmapProvider
 from app.tools.poi_pool import PoiPool
 from fakes import (
@@ -672,6 +673,124 @@ def test_check_plan_forwards_rounds_to_trip():
     }
     out = run(nodes.check_plan(_req_state(draft=draft, check_rounds=1)))
     assert out["trip"]["validation"]["rounds"] == 1
+
+
+# ── M3：三态在**节点层**的表现 ─────────────────────────────
+
+
+def _one_stop_draft(poi_id: str, day: date = TODAY, arrive: str = "09:00") -> dict:
+    return {
+        "title": "x",
+        "days": [
+            {
+                "date": day.isoformat(),
+                "theme": "t",
+                "stops": [
+                    {"poi_id": poi_id, "arrive": arrive, "stay_min": 90, "match_reason": "r"}
+                ],
+            }
+        ],
+    }
+
+
+def test_check_plan_unknown_is_visible_but_never_blocks():
+    """🔴 **三态在节点层的表现** —— M3 最该守住的一条。
+
+    构造：青城山实测**没有** `open_time` → `open_today` 只能落 `unknown`。
+
+    断言三件事，每一件对应一个具体的坑：
+
+    1. `trip.days[0].stops[0].checks` 里**确实有**那条 unknown
+       （否则前端画不出灰色"无法判定" —— 而"如实标灰"是这个项目的核心视觉语言）
+    2. `blocking` **是空的**（否则 agent 会去打回重排，而"高德没给营业时间"
+       它**永远修不好** → 白白烧两轮，最后降级输出）
+    3. `validation.remaining` 里也没有它
+       （`ValidationIssue.level` 只有 hard/soft 两个值，装不下 unknown；
+        硬塞进去会让"前端把它当成一种风险"变成既成事实）
+    """
+    nodes = make_nodes()
+    # 青城山在池子第 9 位，所以这里要用全量池（默认的 `pool_of(5)` 不含它）
+    out = run(
+        nodes.check_plan(
+            _req_state(collected_pois=pool_of(9), draft=_one_stop_draft(POI_IDS[8]))
+        )
+    )
+
+    stop_checks = out["trip"]["days"][0]["stops"][0]["checks"]
+    statuses = {c["code"]: c["status"] for c in stop_checks}
+
+    assert statuses.get("open_today") == "unknown", (
+        f"青城山没有 open_time，open_today 必须落 unknown 而不是 {statuses.get('open_today')}"
+    )
+    assert statuses.get("poi_exists") == "pass", "它是池子里的真 POI，这条该绿"
+
+    assert out["blocking"] == [], f"unknown 不该打回：{out['blocking']}"
+    assert out["trip"]["summary"]["hard_errors"] == 0
+    assert out["validation"]["remaining"] == [], "unknown 不是一种'剩余风险'"
+
+
+class _SlowProvider(MockAmapProvider):
+    """距离永远超限的假 provider —— 用来在节点层构造**跨天段超限**。
+
+    ⚠️ 为什么不直接改 `MockAmapProvider.calc_distance`：
+       mock 的距离数值是 2026-09-15 **实测校准过**的（三段路网系数）。
+       为了造一个失败场景去改它，等于让"校准"这件事失效 ——
+       下次真数据变了，没人分得清那是模型偏差还是有人在测试里动过手。
+       测试需要极端值时，**在测试里覆盖**，不污染被校准的实现。
+    """
+
+    async def calc_distance(self, origin, dest):  # type: ignore[override]
+        return DistanceResult(km=200.0, drive_min=200, straight_km=150.0)
+
+
+def test_check_plan_actually_checks_cross_day_hop():
+    """🔴 `check_plan` 必须**真的把 `distance_fn` 传下去**，否则远郊首站没人判。
+
+    这是 M3 之前一直漏掉的那个缺口（见 `validate.check_cross_day_hop` 的注释）：
+    `Stop.from_prev_drive_min` 对当天第 1 站**恒为 0**，所以
+    "第 2 天一早从市区开去青城山"这一大段车程，所有单跳判据都看不见。
+
+    这条测试的价值在于它**能红**：把 `check_plan` 里那个
+    `distance_fn=self.provider.calc_distance` 参数删掉，它立刻失败。
+    """
+    nodes = make_nodes(provider=_SlowProvider(today=TODAY))
+    draft = {
+        "title": "x",
+        "days": [
+            {
+                "date": TODAY.isoformat(),
+                "theme": "市区",
+                "stops": [
+                    {
+                        "poi_id": POI_IDS[1],  # 锦里（紧挨武侯祠，算"市区那晚的落脚点"）
+                        "arrive": "09:00",
+                        "stay_min": 90,
+                        "match_reason": "r",
+                    }
+                ],
+            },
+            {
+                "date": TODAY.isoformat(),
+                "theme": "远郊",
+                "stops": [
+                    {
+                        "poi_id": POI_IDS[8],  # 青城山
+                        "arrive": "09:00",
+                        "stay_min": 90,
+                        "match_reason": "r",
+                    }
+                ],
+            },
+        ],
+    }
+    out = run(nodes.check_plan(_req_state(collected_pois=pool_of(9), draft=draft)))
+
+    assert out["blocking"], "第 2 天第一站要开 200 分钟，必须被打回"
+    reason = out["blocking"][0]
+    assert "第 2 天" in reason, f"要指出是哪一天：{reason}"
+    assert "昨天的最后一站" in reason, f"要说清这是跨天段（不是当天某一跳）：{reason}"
+    assert out["trip"]["summary"]["hard_errors"] == len(out["blocking"])
+    assert out["validation"]["remaining"], "硬错要同时进 remaining（前端看得到风险清单）"
 
 
 # ══════════════════════════════════════════════════════════════

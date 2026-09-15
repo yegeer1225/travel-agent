@@ -1,0 +1,77 @@
+{
+  "collected_at": "probe",
+  "items": [
+    {
+      "poi_id": "B001C07VJ2",
+      "name": "成都武侯祠博物馆",
+      "type": "科教文化服务;博物馆;博物馆",
+      "typecode": "140100",
+      "open_time": "08:30-18:30",
+      "rating": "4.8"
+    },
+    {
+      "poi_id": "B0FFFD3P2C",
+      "name": "锦里古街",
+      "type": "风景名胜;风景名胜;风景名胜",
+      "typecode": "110200",
+      "open_time": "24小时营业",
+      "rating": "4.8"
+    },
+    {
+      "poi_id": "B001C7X8QA",
+      "name": "人民公园",
+      "type": "风景名胜;风景名胜;国家级景点",
+      "typecode": "110202",
+      "open_time": "24小时营业",
+      "rating": "4.8"
+    },
+    {
+      "poi_id": "B001C7YCM4",
+      "name": "宽窄巷子景区",
+      "type": "购物服务;特色商业街;特色商业街|风景名胜;风景名胜相关;旅游景点",
+      "typecode": "061000|110000",
+      "open_time": "24小时营业",
+      "rating": "4.8"
+    },
+    {
+      "poi_id": "B001C7WE5S",
+      "name": "成都大熊猫繁育研究基地",
+      "type": "风景名胜;风景名胜;国家级景点",
+      "typecode": "110202",
+      "open_time": "07:30-17:00 08:00-16:30",
+      "rating": "4.8"
+    },
+    {
+      "poi_id": "B0FFF6X49V",
+      "name": "成都太古里",
+      "type": "购物服务;商场;购物中心",
+      "typecode": "060101",
+      "open_time": "10:00-22:00",
+      "rating": "4.9"
+    },
+    {
+      "poi_id": "B001C8RQLM",
+      "name": "春熙路步行街",
+      "type": "购物服务;特色商业街;特色商业街",
+      "typecode": "061000",
+      "open_time": "24小时营业",
+      "rating": "4.9"
+    },
+    {
+      "poi_id": "B001C06PA9",
+      "name": "都江堰景区",
+      "type": "风景名胜;风景名胜;国家级景点",
+      "typecode": "110202",
+      "open_time": "08:00-18:00 08:00-17:30",
+      "rating": "4.8"
+    },
+    {
+      "poi_id": "B001C06ESL",
+      "name": "青城山景区",
+      "type": "风景名胜;风景名胜;世界遗产",
+      "typecode": "110201",
+      "open_time": null,
+      "rating": "4.7"
+    }
+  ]
+}

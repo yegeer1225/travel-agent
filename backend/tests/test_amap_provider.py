@@ -409,7 +409,10 @@ def test_get_weather_returns_matching_day():
     #    展示层的拼接（"北风 1-3 级"）是前端的事，数据层不预先化妆。
     assert weather.day_wind == "北"
     assert weather.day_power == "1-3"
-    assert weather.report_time == "2026-09-15 21:36:30"
+    # `report_time` **从 fixture 推导，不硬编码** —— 它是"探针跑的那一刻"，
+    # 每次重跑探针都会变。硬编码的代价是"更新 fixture 就红一次"，
+    # 而那次红跟代码对不对**毫无关系**，只会浪费一轮排查。
+    assert weather.report_time == load("weather_chengdu.json")["forecasts"][0]["reporttime"]
 
 
 def test_get_weather_out_of_window_says_why():
@@ -495,8 +498,13 @@ def test_calc_distance_from_real_sample():
 
     result = run(provider.calc_distance(WUHOU, QINGCHENG))
 
-    assert result.km == 64.35, "原文 64346 米"
-    assert result.drive_min == 88, "原文 5283 秒 → 88 分钟"
+    # 期望值**从 fixture 推导**，不硬编码数字。原因分两层：
+    # ① `duration` 是**实时交通估算**，同一条路线两次请求都不一样（实测 5214s / 5283s）
+    # ② 硬编码的具体数字会让"重跑探针更新 fixture"变成一次无谓的排红
+    # 而"从原始值推导期望"既钉住了换算逻辑（米→km、秒→分），又不对上游波动过敏。
+    raw = load("distance_type1_wuhou_qingcheng.json")["results"][0]
+    assert result.km == round(int(raw["distance"]) / 1000, 2)
+    assert result.drive_min == max(1, round(int(raw["duration"]) / 60))
     assert fake.params()["type"] == "1", "必须是驾车不是直线"
 
 

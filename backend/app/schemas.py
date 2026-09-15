@@ -227,6 +227,21 @@ class Day(BaseModel):
     stops: list[Stop] = Field(default_factory=list)
     day_stats: DayStats | None = None
 
+    checks: list[Check] = Field(default_factory=list)
+    """**天级判据**（M3 补的字段）。默认空，所以老数据（M5 之前存的 `trip_json`）照样能读。
+
+    为什么 `Stop.checks` 不够 —— 有两类判据的**主语是"这一天"而不是"某一站"**：
+
+    · `weather_conflict`：暴雨撞上户外景点。罚的是"这一天这么排"，不是某一站
+    · `walk_load`：当天累计走路量超出同行人的承受范围。同上
+
+    硬把天级判据挂到某个 `Stop` 上会出两个问题：判据的语义被扭曲；
+    同一份错误在一天里重复 N 次（前端会显示 5 个一模一样的红标）。
+
+    ⚠️ 这是 **M0 冻结后的一次契约变更**，理由和时点都记在 `DECISIONS.md D37`：
+    变更发生在**前端动手之前**，成本最低；不加这个字段，
+    `方案.md` 6.1 里那两条硬判据**没有地方安放**。"""
+
 
 class TripSummary(BaseModel):
     """给"行程卡"和"路线总览"页顶部用的汇总。**全部代码算**。"""

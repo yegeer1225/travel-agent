@@ -6,6 +6,8 @@
 2. **失败路径真的会失败** —— 搜不到就返回空，不偷偷返回"最接近的几个"
    （mock 太"聪明"会让 M1~M3 的空结果分支永远测不到）
 3. **`unavailable` 而不是硬凑** —— 天气窗口外必须如实说查不到
+4. **距离数值被实测钉住** —— mock 的误差会传导成**判据的结论错误**（不是"不准"而已），
+   所以它和真数据一样需要断言。见「四、距离」一节。
 
 不引 `pytest-asyncio`：M1 只有 mock provider 是异步的，为此多一个插件
 就多一处要钉的版本（`requirements.txt` 里已经有三个包不能松）。
@@ -14,7 +16,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import date, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -160,26 +164,78 @@ def test_weather_other_city_is_unavailable(provider: MockAmapProvider) -> None:
 
 
 # ══════════════════════════════════════════════════════════════
-#  四、距离
+#  四、距离 —— 用实测样本校准（2026-09-15 重写）
 # ══════════════════════════════════════════════════════════════
+#
+#  这一节从"检查返回值像不像距离"升级成"检查 mock 的距离**准不准**"。
+#
+#  起因不是洁癖，是一次假阳性：跨天判据（`validate.py` 的 `reachable`）在 mock 下
+#  把「人民公园→都江堰」算成 160 分钟（实测 75 分钟），于是**把一份正常行程判成
+#  硬错、白白打回两轮**。
+#  → 结论：mock 的数值误差一旦传导到判据上，就不再是"数值不准"，而是"结论错了"。
+#
+#  ⚠️ 期望值的来源**不是**"我记得实测是多少"，而是探针落盘的 fixture
+#  （`tests/fixtures/amap/distance_calibration.json`，由 `probe_amap.py` 的
+#  校准采样节生成）。手写的期望值改起来太顺手，而改 fixture 必须重跑探针 ——
+#  这就是"把结论绑在可重跑路径上"的意思。
+
+_FIXTURES = Path(__file__).parent / "fixtures" / "amap"
+_CALIBRATION: list[dict] = json.loads(
+    (_FIXTURES / "distance_calibration.json").read_text(encoding="utf-8")
+)["cases"]
 
 
-def test_calc_distance_returns_road_longer_than_straight(
+def _coords(name_fragment: str) -> tuple[float, float]:
+    """按名称/别名片段在池子里找坐标。找不到就报错（而不是跳过）——
+    悄悄跳过会让"样本名写错了"表现为"测试通过但什么都没测"。"""
+    for poi in MOCK_POI_POOL:
+        if name_fragment in poi.name or name_fragment in poi.alias:
+            return (poi.lng, poi.lat)
+    raise AssertionError(f"mock 池里没有匹配 {name_fragment!r} 的 POI（样本名写错了？）")
+
+
+def _calibration_pair(label: str) -> tuple[tuple[float, float], tuple[float, float]]:
+    """从 fixture 的 label（形如 `远郊   武侯祠→都江堰`）反解出两端坐标。"""
+    _, _, route = label.partition(" ")
+    origin, _, dest = route.partition("→")
+    return _coords(origin.strip()), _coords(dest.strip())
+
+
+def _effective_speed_kmh(d: DistanceResult) -> float:
+    """用返回的两个值反推均速。输出是四舍五入过的，所以这个值只用于**比大小**。"""
+    return d.km / d.drive_min * 60 if d.drive_min else 0.0
+
+
+@pytest.mark.parametrize("case", _CALIBRATION, ids=[c["label"].replace(" ", "_") for c in _CALIBRATION])
+def test_calc_distance_matches_measured_sample(
     provider: MockAmapProvider,
+    case: dict,
 ) -> None:
-    """驾车里程必须 ≥ 直线距离（绕行系数 > 1）。
+    """mock 的驾车距离/耗时必须落在**实测样本**的容差内。
 
-    比值异常（比如 < 1）说明坐标系搞反了或系数写错 —— 用 `straight_km`
-    交叉验证是**刻意保留的第二个值**，就是为了让这种错能被断言出来。
+    容差不对称，因为两者性质不同：
+    - 里程 ±10%：路网系数是稳定量（同一个城市短期内不变）
+    - 耗时 ±20%：受实时路况影响，实测值本身就在抖（探针两次抓 `duration`
+      得到 5214s / 5283s）→ 卡太紧会变成"过几天自己变红"的测试
+
+    这个界够松到不误报，也够紧到能拦住错误模型：
+    旧的"全局 1.3 / 28.0"把都江堰算成 160 分钟，**偏 +113%**，照样红。
     """
-    wuhou = (104.047992, 30.646168)
-    panda = (104.138176, 30.740573)
-    d = run(provider.calc_distance(wuhou, panda))
+    origin, dest = _calibration_pair(case["label"])
+    d = run(provider.calc_distance(origin, dest))
 
     assert isinstance(d, DistanceResult)
-    assert d.km > d.straight_km
+    assert d.km > d.straight_km, "驾车里程必须 > 直线距离（系数 > 1），否则是坐标系搞反了"
     assert d.drive_min > 0
-    assert 8.0 < d.km < 20.0, f"武侯祠→熊猫基地 实测驾车约 15km，mock 给出 {d.km}"
+    assert abs(d.straight_km - case["straight_km"]) <= 0.05, (
+        f"{case['label']}：直线距离对不上，fixture={case['straight_km']} mock={d.straight_km}"
+    )
+    assert abs(d.km - case["km"]) / case["km"] <= 0.10, (
+        f"{case['label']}：驾车里程偏差 >10%，实测 {case['km']}km mock {d.km}km"
+    )
+    assert abs(d.drive_min - case["minutes"]) / case["minutes"] <= 0.20, (
+        f"{case['label']}：驾车耗时偏差 >20%，实测 {case['minutes']}min mock {d.drive_min}min"
+    )
 
 
 def test_calc_distance_same_point_is_zero(provider: MockAmapProvider) -> None:
@@ -187,6 +243,39 @@ def test_calc_distance_same_point_is_zero(provider: MockAmapProvider) -> None:
     d = run(provider.calc_distance(p, p))
     assert d.km == 0
     assert d.drive_min == 0
+
+
+def test_road_factor_decreases_while_speed_increases(provider: MockAmapProvider) -> None:
+    """🔴 路网系数随距离**递减**、均速随距离**递增**。
+
+    这一条钉住的不是某个数值，而是**模型的形状** —— 它比数值断言更难被绕过。
+
+    实测（见 `mock.py` 的「距离」一节）：
+    | 距离段 | 路网系数 | 均速 |
+    |---|---|---|
+    | 市区内 | 2.18 | 11.2 |
+    | 近郊 | 1.69 | 28.0 |
+    | 远郊 | 1.15 | 47.0 |
+
+    物理原因很直白：市区两公里要绕单行道、等十几个红绿灯；远郊上快速路一路六十。
+    **原先的"全局常量 1.3 / 28.0"在这两个方向上都画成一条平线** ——
+    谁把分段表退回成一套常量，这条立刻红。
+    """
+    by_distance = {
+        "市区内": ("武侯祠", "宽窄巷子"),
+        "近郊": ("人民公园", "熊猫基地"),
+        "远郊": ("武侯祠", "都江堰"),
+    }
+    factors: list[float] = []
+    speeds: list[float] = []
+    for label, (a, b) in by_distance.items():
+        d = run(provider.calc_distance(_coords(a), _coords(b)))
+        factors.append(d.km / d.straight_km)
+        speeds.append(_effective_speed_kmh(d))
+        assert d.km > d.straight_km, f"{label} 的驾车里程不该小于直线距离"
+
+    assert factors[0] > factors[1] > factors[2], f"路网系数应递减，实得 {factors}"
+    assert speeds[0] < speeds[1] < speeds[2], f"均速应递增，实得 {speeds}"
 
 
 # ══════════════════════════════════════════════════════════════
@@ -225,9 +314,33 @@ def test_mock_pois_declare_unknown_fields_as_none() -> None:
     assert len(MOCK_POI_POOL) == 9
 
     for poi in MOCK_POI_POOL:
-        assert poi.typecode is None, f"{poi.name} 的 typecode 不该有值（未采集）"
         assert poi.photos == [], f"{poi.name} 的 photos 不该有值（未采集）"
         assert poi.cost_per_person is None, f"{poi.name} 的 cost 应为 None（人均≠门票）"
+
+
+def test_mock_pois_types_are_measured_not_invented() -> None:
+    """`type` / `typecode` 已**补采真值**，所以这条从"必须为 None"反转成"**格式必须像真值**"。
+
+    ⚠️ 这个反转本身是一条判据：**一旦某个字段填了值，就得有东西能挡住"编造"**。
+    没有格式校验的话，别人看到 `typecode="110100"` 根本分不出它是查来的还是编的。
+
+    （2026-09-15 采自 `probe_amap.py --collect-mock`，按 `poi_id` 精确匹配。）
+    """
+    measured = 0
+    for poi in MOCK_POI_POOL:
+        if poi.typecode is not None:
+            measured += 1
+            for part in poi.typecode.split("|"):
+                assert part.isdigit() and len(part) == 6, (
+                    f"{poi.name} 的 typecode 不像高德真值：{poi.typecode!r}（应形如 '140100'）"
+                )
+        if poi.type is not None:
+            for segment in poi.type.split("|"):
+                assert segment.count(";") == 2, (
+                    f"{poi.name} 的 type 段不是「大类;中类;小类」三级结构：{segment!r}"
+                )
+
+    assert measured == len(MOCK_POI_POOL), "9 个 POI 的 typecode 应该都采到了（否则说明探针漏了某条）"
 
 
 def test_describe_advertises_mock_mode(provider: MockAmapProvider) -> None:

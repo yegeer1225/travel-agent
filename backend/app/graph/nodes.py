@@ -68,6 +68,7 @@ from app.graph.intent import (
     merge_requirements,
     parse_intent_json,
 )
+from app.graph.validate import validate_trip
 from app.providers.base import AmapProvider
 from app.schemas import (
     AmapPoi,
@@ -617,9 +618,19 @@ class Nodes:
     async def check_plan(self, state: dict[str, Any]) -> dict[str, Any]:
         """补全 + 校验，产出 `Trip`。
 
-        M1 只有**一条硬判据**（`poi_exists`，在 `draft._check_poi_exists` 里），
-        M3 补齐 5 硬 + 4 软。这里先把**流程形状**跑通：
-        校验 → 有硬错就 `blocking` 非空 → 条件边决定打回还是收尾。
+        **两类硬错在这里合流**（M3）：
+
+        | 来源 | 拦的是什么 | 谁产出 |
+        |---|---|---|
+        | 组装阶段 | `poi_id` 不在候选池里 → 那些站**根本进不了 `Trip`** | `assemble_trip` 的 `assemble_blocking` |
+        | 校验阶段 | 5 条判据（存在性 / 营业时间 / 车程 / 天气 / 走路量） | `validate.validate_trip` 的 `report.blocking` |
+
+        两者拼成 `blocking` 交给条件边 —— 有就 `repair` 打回（上限 2 轮），
+        没有就 `render` 收尾。
+
+        ⚠️ **只有 `fail` 会进来。`unknown` 一条都不许进来**（见下方 `validation` 的注释），
+           否则 agent 会去打回重排一个**数据层面、它永远修不好**的问题 ——
+           白烧两轮，最后还是降级输出。
         """
         draft_dump = state.get("draft") or {}
         if not draft_dump:
@@ -651,7 +662,7 @@ class Nodes:
                 # 拿不到就是拿不到 —— `assemble_trip` 会写 unavailable，**不编**
                 continue
 
-        trip, blocking = await assemble_trip(
+        trip, assemble_blocking = await assemble_trip(
             draft,
             pool,
             self.provider,
@@ -662,9 +673,32 @@ class Nodes:
             rounds=rounds_used,
         )
 
+        # ── M3：整份行程上跑 5 条硬判据 ──
+        # `validate_trip` **原地**把结果写进 `trip.days[].checks` / `stops[].checks`
+        # （每次先清空，所以重算是幂等的 —— 不清的话"重算"会让每个判据出现两遍）。
+        # 传 `distance_fn` 是为了让它能算**跨天段**（昨天最后一站 → 今天第一站）：
+        # 那一段是"当天第 1 站"唯一能拿到的距离，`from_prev_km` 对它恒为 0。
+        report = await validate_trip(
+            trip, pool, req, distance_fn=self.provider.calc_distance
+        )
+
+        # 两类硬错合起来：
+        # ① 组装阶段拦下的（`poi_id` 不在池子里 —— 那些站根本没能进 `Trip`）
+        # ② 校验阶段发现的（车程 / 开放时间 / 天气 / 走路量）
+        blocking = [*assemble_blocking, *report.blocking]
+        trip.summary.hard_errors = len(blocking)
+
         remaining = [
-            ValidationIssue(code="poi_exists", msg=msg, level=CheckLevel.HARD) for msg in blocking
+            ValidationIssue(code="poi_exists", msg=msg, level=CheckLevel.HARD)
+            for msg in assemble_blocking
+        ] + [
+            ValidationIssue(code=check.code, msg=check.msg or "", level=CheckLevel.HARD)
+            for check in report.hard_failed
         ]
+        # ⚠️ `report.unknown`（判不了的那些）**故意不进 `remaining`**：
+        #    `ValidationIssue.level` 只有 hard / soft 两个值，而 `unknown` 两者都不是 ——
+        #    硬塞进去会让"前端把它当成一种风险"变成既成事实。
+        #    它只留在 `checks` 里显示灰色，**不打回也不算通过**。
         validation = Validation(rounds=rounds_used, fixed=[], remaining=remaining)
         trip.validation = validation
 

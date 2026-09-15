@@ -11,7 +11,7 @@
 |---|---|
 | 9 个 POI 的 `poi_id` / 名称 / 经纬度 / `rating` / `open_time` | ✅ **2026-09-15 实测抓取的真值**，一个都没改 |
 | 天气（白天/夜间/温度/风力） | ✅ 实测抓到的真预报；**日期按"今天"滚动**，以复现"只覆盖 4 天"这个真实约束 |
-| 距离 | ⚠️ **haversine 直线距离 × 1.3**（模拟路网绕行）。**不是真驾车距离** —— 这是 mock 与 real 之间唯一"量级对、数值不准"的地方 |
+| 距离 | ⚠️ **haversine 直线距离 × 分段路网系数**（三段，见下方「距离」一节）。**不是真驾车距离** —— 这是 mock 与 real 之间唯一"量级对、数值不准"的地方 |
 | `typecode` / `photos` / `address` / `adname` / `adcode` / `cost_per_person` | ⬜ **实测未采集 → 一律 `None` / `[]`。不编造** |
 
 最后一行是刻意的：**mock 缺字段比 mock 有假字段安全得多**。
@@ -49,11 +49,19 @@ MOCK_CITY = "成都"
 # 想拿全量的地方（测试 / 调试脚本）直接用这个，**不要**为了拿全量
 # 在 `search_poi` 里加"搜空词返回全部"这种口子 —— 那会让"搜不到返回空"
 # 这条真实行为（见本文件顶部第 1 条）失效。
+#
+# `type` / `typecode` 是 2026-09-15 补采的（`probe_amap.py --collect-mock`）：
+# 按 `poi_id` **精确匹配**拿的真值，不是按名字搜出来的（「人民公园」全国有很多个）。
+# ⚠️ 它们**不是装饰字段** —— `validate.py` 的 `weather_conflict` 判据靠 `type`
+#    区分"户外景点"与"室内场馆"（武侯祠是博物馆=室内，青城山是风景名胜=户外）。
+#    缺了它那条判据在 mock 下**永远走不到**，测试也就写不出来。
 
 MOCK_POI_POOL: tuple[AmapPoi, ...] = (
     AmapPoi(
         poi_id="B001C07VJ2",
         name="成都武侯祠博物馆",
+        type='科教文化服务;博物馆;博物馆',
+        typecode='140100',
         alias=["武侯祠", "武侯祠博物馆"],
         lng=104.047992,
         lat=30.646168,
@@ -63,6 +71,8 @@ MOCK_POI_POOL: tuple[AmapPoi, ...] = (
     AmapPoi(
         poi_id="B0FFFD3P2C",
         name="锦里古街",
+        type='风景名胜;风景名胜;风景名胜',
+        typecode='110200',
         alias=["锦里"],
         lng=104.049828,
         lat=30.645994,
@@ -72,6 +82,8 @@ MOCK_POI_POOL: tuple[AmapPoi, ...] = (
     AmapPoi(
         poi_id="B001C7X8QA",
         name="人民公园",
+        type='风景名胜;风景名胜;国家级景点',
+        typecode='110202',
         lng=104.057641,
         lat=30.656990,
         rating="4.8",
@@ -80,6 +92,8 @@ MOCK_POI_POOL: tuple[AmapPoi, ...] = (
     AmapPoi(
         poi_id="B001C7YCM4",
         name="宽窄巷子景区",
+        type='购物服务;特色商业街;特色商业街|风景名胜;风景名胜相关;旅游景点',
+        typecode='061000|110000',
         alias=["宽窄巷子"],
         lng=104.053307,
         lat=30.663869,
@@ -89,6 +103,8 @@ MOCK_POI_POOL: tuple[AmapPoi, ...] = (
     AmapPoi(
         poi_id="B001C7WE5S",
         name="成都大熊猫繁育研究基地",
+        type='风景名胜;风景名胜;国家级景点',
+        typecode='110202',
         alias=["熊猫基地", "大熊猫基地", "熊猫繁育研究基地"],
         lng=104.138176,
         lat=30.740573,
@@ -99,6 +115,8 @@ MOCK_POI_POOL: tuple[AmapPoi, ...] = (
     AmapPoi(
         poi_id="B0FFF6X49V",
         name="成都太古里",
+        type='购物服务;商场;购物中心',
+        typecode='060101',
         alias=["太古里"],
         lng=104.083809,
         lat=30.653358,
@@ -108,6 +126,8 @@ MOCK_POI_POOL: tuple[AmapPoi, ...] = (
     AmapPoi(
         poi_id="B001C8RQLM",
         name="春熙路步行街",
+        type='购物服务;特色商业街;特色商业街',
+        typecode='061000',
         alias=["春熙路"],
         lng=104.077774,
         lat=30.655544,
@@ -117,6 +137,8 @@ MOCK_POI_POOL: tuple[AmapPoi, ...] = (
     AmapPoi(
         poi_id="B001C06PA9",
         name="都江堰景区",
+        type='风景名胜;风景名胜;国家级景点',
+        typecode='110202',
         alias=["都江堰"],
         lng=103.610529,
         lat=31.003363,
@@ -126,6 +148,8 @@ MOCK_POI_POOL: tuple[AmapPoi, ...] = (
     AmapPoi(
         poi_id="B001C06ESL",
         name="青城山景区",
+        type='风景名胜;风景名胜;世界遗产',
+        typecode='110201',
         alias=["青城山"],
         lng=103.563817,
         lat=30.904400,
@@ -241,12 +265,50 @@ def _build_weather(day: date, today_at_call: date) -> Weather:
 # ══════════════════════════════════════════════════════════════
 #  距离
 # ══════════════════════════════════════════════════════════════
+#
+# 🔴 2026-09-15 校准：**"单一常量"模型是错的**。
+#
+# 原先用 `直线 × 1.3 ÷ 28km/h` 一套常量估所有距离。实测四条不同距离段的样本才发现，
+# **路网系数和平均车速都随距离段变化**，而且变化很大：
+#
+# | 距离段 | 样本 | 直线 km | 驾车 km | 分钟 | 路网系数 | 均速 |
+# |---|---|---|---|---|---|---|
+# | 市区内 | 武侯祠→宽窄巷子 | 2.0 | 4.4 | 24 | **2.18** | **11.2** |
+# | 近郊 | 人民公园→熊猫基地 | 12.1 | 20.4 | 44 | **1.69** | **28.0** |
+# | 远郊 | 武侯祠→都江堰 | 57.6 | 63.9 | 75 | **1.11** | **50.9** |
+# | 远郊 | 武侯祠→青城山 | 54.4 | 64.3 | 89 | **1.18** | **43.6** |
+#
+# 原因很直白：市区 2 公里要绕单行道、等十几个红绿灯；远郊上快速路一路 60km/h。
+#
+# ⚠️ **这个偏差会直接变成假阳性**：改之前 mock 把「人民公园→都江堰」算成 160 分钟，
+#    而实测是 75 分钟 —— 于是 `reachable` 判据（带长辈上限 90 分钟）把一份**正常行程
+#    判成硬错、白白打回两轮**。mock 的误差一旦传导到判据上，就不再是"数值不准"，
+#    而是"结论错了"。
+#
+# 顺带一提：原来那对常量 `1.3 / 28.0` **恰好只对"近郊"这一段准**（12km 那条实测就是
+# 1.689 / 28.0）。所以它不算"随便填的"，只是被当成了全局值。
 
-_ROAD_FACTOR = 1.3
-"""直线 → 路网的绕行系数。城市道路经验值 1.25~1.45，取中偏保守。"""
+_SEGMENTS: tuple[tuple[float, float, float], ...] = (
+    (5.0, 2.18, 11.2),
+    (30.0, 1.69, 28.0),
+    (math.inf, 1.15, 47.0),
+)
+"""`(直线距离上界 km, 路网系数, 平均车速 km/h)` —— 按直线距离分三段取参数。
 
-_AVG_SPEED_KMH = 28.0
-"""市区平均车速。用来把距离换算成时间 —— 不引入额外数据源。"""
+取"上界"而不是"区间"，是为了让查表逻辑只要一个 `for` 循环；
+最后一段用 `inf` 兜底，所以**永远查得到**，不会有"落在所有区间之外"的分支
+（那种分支在真实项目里就是"某个距离段的行为没人测过"）。
+
+远郊那一段的系数取 1.15、速度取 47，是都江堰（1.11/50.9）和青城山（1.18/43.6）的中间值 ——
+**两条样本往两边夹**，比只信一条稳。"""
+
+
+def _segment_for(straight_km: float) -> tuple[float, float]:
+    """按直线距离查 `(路网系数, 均速)`。"""
+    for upper, factor, speed in _SEGMENTS:
+        if straight_km < upper:
+            return factor, speed
+    return _SEGMENTS[-1][1], _SEGMENTS[-1][2]
 
 
 def _haversine_km(a: tuple[float, float], b: tuple[float, float]) -> float:
@@ -322,8 +384,9 @@ class MockAmapProvider:
         dest: tuple[float, float],
     ) -> DistanceResult:
         straight = _haversine_km(origin, dest)
-        km = straight * _ROAD_FACTOR
-        minutes = round(km / _AVG_SPEED_KMH * 60)
+        factor, speed = _segment_for(straight)
+        km = straight * factor
+        minutes = round(km / speed * 60)
         return DistanceResult(
             km=round(km, 1),
             drive_min=max(0, minutes),
