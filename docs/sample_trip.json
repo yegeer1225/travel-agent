@@ -1,0 +1,293 @@
+{
+  "trip_id": "3f1c9a2e-5b7d-4e8a-9c31-2d6f0a4b8e17",
+  "session_id": "sess_7d4c1a92",
+  "user_id": 1,
+  "title": "成都3日游·带爸妈慢节奏",
+  "destination": "成都",
+  "source": "generated",
+  "created_at": "2026-09-15T20:45:00+08:00",
+  "updated_at": "2026-09-15T20:47:12+08:00",
+
+  "days": [
+    {
+      "day": 1,
+      "date": "2026-09-16",
+      "theme": "市区古迹·一天不挪窝",
+      "weather": {
+        "status": "ok",
+        "day_weather": "阴",
+        "night_weather": "阵雨",
+        "day_temp": 23,
+        "night_temp": 17,
+        "day_wind": "北",
+        "day_power": "1-3",
+        "report_time": "2026-09-15 20:36:13",
+        "note": null
+      },
+      "stops": [
+        {
+          "seq": 1,
+          "name": "成都武侯祠博物馆",
+          "poi_id": "B001C07VJ2",
+          "lng": 104.047992,
+          "lat": 30.646168,
+          "coord_sys": "GCJ-02",
+          "arrive": "09:00",
+          "stay_min": 90,
+          "leave": "10:30",
+          "from_prev_km": 0,
+          "from_prev_drive_min": 0,
+          "cost_per_person": null,
+          "rating": "4.8",
+          "open_time": "08:30-18:30",
+          "match_reason": "三国主题历史古迹，园区平坦不爬坡，适合带爸妈慢慢逛",
+          "checks": [
+            {"level": "hard", "code": "poi_exists", "status": "pass"},
+            {"level": "hard", "code": "reachable", "status": "pass"},
+            {"level": "hard", "code": "open_today", "status": "pass"},
+            {"level": "soft", "code": "need_reserve", "status": "fail", "msg": "旺季建议提前 3 天在官方渠道预约，现场排队约 30 分钟"}
+          ]
+        },
+        {
+          "seq": 2,
+          "name": "锦里古街",
+          "poi_id": "B0FFFD3P2C",
+          "lng": 104.049828,
+          "lat": 30.645994,
+          "coord_sys": "GCJ-02",
+          "arrive": "10:34",
+          "stay_min": 90,
+          "leave": "12:04",
+          "from_prev_km": 0.5,
+          "from_prev_drive_min": 4,
+          "cost_per_person": null,
+          "rating": "4.8",
+          "open_time": "24小时营业",
+          "match_reason": "紧邻武侯祠，出门即到，午餐和小吃集中，不用额外赶路",
+          "checks": [
+            {"level": "hard", "code": "poi_exists", "status": "pass"},
+            {"level": "hard", "code": "reachable", "status": "pass"},
+            {"level": "hard", "code": "open_today", "status": "pass"}
+          ]
+        },
+        {
+          "seq": 3,
+          "name": "人民公园",
+          "poi_id": "B001C7X8QA",
+          "lng": 104.057641,
+          "lat": 30.656990,
+          "coord_sys": "GCJ-02",
+          "arrive": "14:00",
+          "stay_min": 90,
+          "leave": "15:30",
+          "from_prev_km": 2.5,
+          "from_prev_drive_min": 15,
+          "cost_per_person": null,
+          "rating": "4.8",
+          "open_time": "24小时营业",
+          "match_reason": "鹤鸣茶社可坐下喝茶歇脚，节奏最慢的一段，适合长辈",
+          "checks": [
+            {"level": "hard", "code": "poi_exists", "status": "pass"},
+            {"level": "hard", "code": "reachable", "status": "pass"},
+            {"level": "hard", "code": "open_today", "status": "pass"}
+          ]
+        },
+        {
+          "seq": 4,
+          "name": "宽窄巷子景区",
+          "poi_id": "B001C7YCM4",
+          "lng": 104.053307,
+          "lat": 30.663869,
+          "coord_sys": "GCJ-02",
+          "arrive": "15:43",
+          "stay_min": 100,
+          "leave": "17:23",
+          "from_prev_km": 1.8,
+          "from_prev_drive_min": 13,
+          "cost_per_person": null,
+          "rating": "4.8",
+          "open_time": "24小时营业",
+          "match_reason": "步行街区，路面平整，傍晚人少，作为当天收尾点",
+          "checks": [
+            {"level": "hard", "code": "poi_exists", "status": "pass"},
+            {"level": "hard", "code": "reachable", "status": "pass"},
+            {"level": "hard", "code": "open_today", "status": "pass"}
+          ]
+        }
+      ],
+      "day_stats": {"distance_km": 4.8, "drive_min": 32, "walk_km": 5.2}
+    },
+
+    {
+      "day": 2,
+      "date": "2026-09-17",
+      "theme": "上午看熊猫·下午逛市区",
+      "weather": {
+        "status": "ok",
+        "day_weather": "阵雨",
+        "night_weather": "多云",
+        "day_temp": 25,
+        "night_temp": 19,
+        "day_wind": "北",
+        "day_power": "1-3",
+        "report_time": "2026-09-15 20:36:13",
+        "note": null
+      },
+      "stops": [
+        {
+          "seq": 1,
+          "name": "成都大熊猫繁育研究基地",
+          "poi_id": "B001C7WE5S",
+          "lng": 104.138176,
+          "lat": 30.740573,
+          "coord_sys": "GCJ-02",
+          "arrive": "08:00",
+          "stay_min": 150,
+          "leave": "10:30",
+          "from_prev_km": 0,
+          "from_prev_drive_min": 0,
+          "cost_per_person": null,
+          "rating": "4.8",
+          "open_time": "07:30-17:00 08:00-16:30",
+          "match_reason": "熊猫上午最活跃，开园即到能看到进食；园区有观光电瓶车，长辈不用长距离步行",
+          "checks": [
+            {"level": "hard", "code": "poi_exists", "status": "pass"},
+            {"level": "hard", "code": "reachable", "status": "pass"},
+            {"level": "hard", "code": "open_today", "status": "pass"},
+            {"level": "soft", "code": "need_reserve", "status": "fail", "msg": "需提前 1 天在官方公众号实名预约，每日限流"},
+            {"level": "soft", "code": "early_start", "status": "fail", "msg": "08:00 到达意味着 07:00 前出门，带长辈请注意作息"}
+          ]
+        },
+        {
+          "seq": 2,
+          "name": "成都太古里",
+          "poi_id": "B0FFF6X49V",
+          "lng": 104.083809,
+          "lat": 30.653358,
+          "coord_sys": "GCJ-02",
+          "arrive": "11:05",
+          "stay_min": 90,
+          "leave": "12:35",
+          "from_prev_km": 15.3,
+          "from_prev_drive_min": 35,
+          "cost_per_person": null,
+          "rating": "4.9",
+          "open_time": "10:00-22:00",
+          "match_reason": "室内外结合的商圈，午餐选择多，雨天有遮蔽",
+          "checks": [
+            {"level": "hard", "code": "poi_exists", "status": "pass"},
+            {"level": "hard", "code": "reachable", "status": "pass"},
+            {"level": "hard", "code": "open_today", "status": "pass"}
+          ]
+        },
+        {
+          "seq": 3,
+          "name": "春熙路步行街",
+          "poi_id": "B001C8RQLM",
+          "lng": 104.077774,
+          "lat": 30.655544,
+          "coord_sys": "GCJ-02",
+          "arrive": "12:44",
+          "stay_min": 120,
+          "leave": "14:44",
+          "from_prev_km": 1.1,
+          "from_prev_drive_min": 9,
+          "cost_per_person": null,
+          "rating": "4.9",
+          "open_time": "24小时营业",
+          "match_reason": "与太古里步行相连，逛完即走，下午留出回酒店休息的时间",
+          "checks": [
+            {"level": "hard", "code": "poi_exists", "status": "pass"},
+            {"level": "hard", "code": "reachable", "status": "pass"},
+            {"level": "hard", "code": "open_today", "status": "pass"}
+          ]
+        }
+      ],
+      "day_stats": {"distance_km": 16.4, "drive_min": 44, "walk_km": 3.8}
+    },
+
+    {
+      "day": 3,
+      "date": "2026-09-18",
+      "theme": "远郊一日·都江堰 + 青城山",
+      "weather": {
+        "status": "ok",
+        "day_weather": "阵雨",
+        "night_weather": "阴",
+        "day_temp": 25,
+        "night_temp": 19,
+        "day_wind": "北",
+        "day_power": "1-3",
+        "report_time": "2026-09-15 20:36:13",
+        "note": null
+      },
+      "stops": [
+        {
+          "seq": 1,
+          "name": "都江堰景区",
+          "poi_id": "B001C06PA9",
+          "lng": 103.610529,
+          "lat": 31.003363,
+          "coord_sys": "GCJ-02",
+          "arrive": "09:00",
+          "stay_min": 150,
+          "leave": "11:30",
+          "from_prev_km": 0,
+          "from_prev_drive_min": 0,
+          "cost_per_person": null,
+          "rating": "4.8",
+          "open_time": "08:00-18:00 08:00-17:30",
+          "match_reason": "世界文化遗产，景区内有观光车，主要看水利工程，步行强度可控",
+          "checks": [
+            {"level": "hard", "code": "poi_exists", "status": "pass"},
+            {"level": "hard", "code": "reachable", "status": "pass"},
+            {"level": "hard", "code": "open_today", "status": "pass"}
+          ]
+        },
+        {
+          "seq": 2,
+          "name": "青城山景区",
+          "poi_id": "B001C06ESL",
+          "lng": 103.563817,
+          "lat": 30.904400,
+          "coord_sys": "GCJ-02",
+          "arrive": "12:23",
+          "stay_min": 180,
+          "leave": "15:23",
+          "from_prev_km": 25.5,
+          "from_prev_drive_min": 53,
+          "cost_per_person": null,
+          "rating": "4.7",
+          "open_time": null,
+          "match_reason": "与都江堰同方向，可坐索道上山；但全程台阶较多，长辈需量力",
+          "checks": [
+            {"level": "hard", "code": "poi_exists", "status": "pass"},
+            {"level": "hard", "code": "reachable", "status": "pass"},
+            {"level": "hard", "code": "open_today", "status": "unknown", "msg": "高德未返回该 POI 的开放时间字段，无法判定当天是否开放"}
+          ]
+        }
+      ],
+      "day_stats": {"distance_km": 25.5, "drive_min": 53, "walk_km": 4.5}
+    }
+  ],
+
+  "summary": {
+    "total_distance_km": 46.7,
+    "total_cost_per_person": null,
+    "stop_count": 9,
+    "hard_errors": 0,
+    "soft_warnings": 3
+  },
+
+  "validation": {
+    "rounds": 1,
+    "fixed": [
+      {"code": "daily_drive_time", "msg": "Day3 原方案把都江堰与青城山排在同一天且顺序颠倒，单程车程增加 53 分钟，已调整为都江堰在前、青城山在后"}
+    ],
+    "remaining": [
+      {"level": "soft", "code": "ticket_price_unknown", "msg": "高德不提供门票价格，人均花费无法估算。行程内 9 个 POI 的 biz_ext.cost 均为空（该字段仅餐饮类可靠）"},
+      {"level": "soft", "code": "need_reserve", "msg": "武侯祠、熊猫基地旺季需提前线上预约"},
+      {"level": "soft", "code": "walking_load", "msg": "Day3 青城山台阶较多，与「带爸妈」偏好存在轻微冲突，已提示用户"}
+    ]
+  }
+}
