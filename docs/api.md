@@ -4,6 +4,8 @@
 > 契约变更 = 前后端双倍成本；**改之前先读第七节**。
 >
 > 配套：`backend/app/schemas.py`（数据结构，**唯一事实源**）｜`docs/sample_trip.json`（真实响应样例）
+>
+> 🔒 **已冻结：2026-09-15**（用户过签 7 项关键判断；原「悬而未决」的 6 项全部闭合，决定性内容见 `DECISIONS.md` D25~D31）
 > 最后更新：2026-09-15
 
 ---
@@ -18,7 +20,8 @@
 | 时间 | 时间戳：ISO 8601 带时区 `2026-09-15T20:50:17+08:00`；日期：`2026-10-01`；行程内时刻：`HH:MM`（`09:00`，**`9:00` 会 400**） |
 | 分页 | 统一 `?limit=20&offset=0` → 统一外壳 `{items, total, limit, offset}`（`total` 是**满足条件的总数**，不是本页条数） |
 | 排序 | 列表默认**倒序**（最新在前），接口不提供 `sort` 参数 |
-| 幂等 | `GET` / `PATCH` 幂等；`POST` 不保证（点赞除外，它是切换语义） |
+| 幂等 | `GET` / `PATCH` 幂等（同输入同输出）；**`POST` 不保证**，但**靠唯一索引不会重复写**（点赞/收藏）；🔴 **不要靠"重发一次"来重试 `POST`** —— 见 1.5 |
+| 限流 | **按接口成本分层**（最贵的 `chat` 最严）。命中返回 `429` + **`Retry-After` 头** + body 带 `detail.retry_after`，前端**倒计时后重试**。完整阈值表见 1.5 |
 
 ### 1.1 鉴权：前端从第一天就统一带上（M9 零改动）
 
@@ -73,6 +76,65 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJ1aWQiOjF9.xxx
 - 豆包**不用等后端写完**，M1 一完成就能开工
 - 前端**不需要写任何 `if (mockMode)` 分支** —— 有分支就说明契约没冻结
 - 判断当前是不是 mock：`GET /health` 的 `mock_mode`
+
+### 1.5 重试 / 限流 / 上传 —— 前端要做什么，不要做什么
+
+**后端已经替你重试的**（前端**无感**，不要自己再包一层重试）：
+
+| 后端自动重试 | 次数 | 哪些错误会重试 |
+|---|---|---|
+| 高德 POI 搜索 / 天气 / 距离 | 3 次（退避 1s→2s→4s） | 限流（`status=0` 的 QPS 错误）、超时、5xx |
+| LLM 调用 | 3 次 | `429`、超时、5xx |
+
+**`400` / `401` / `403` 一律不重试** —— 同样的请求重试一次结果还是一样，只多烧一次配额。
+所以前端看到 `400 invalid_param`，**要做的是改参数，不是重试**。
+
+**限流阈值表**（超出 → `429`，`Retry-After` 秒数在头和 body 里都有）：
+
+| 接口 | 维度 | 阈值 |
+|---|---|---|
+| `POST /sessions/{id}/chat` | 用户 | **10 / 小时 · 30 / 天** |
+| **同一 session 并发流** | 会话 | **同时只允许 1 个**（第二个 → `429`） |
+| `POST /trips/paste` | 用户 | **20 / 小时** |
+| `POST /trips/{id}/recheck` | 用户 | **60 / 小时** |
+| `GET /spots/search` | 用户 | **120 / 分钟** |
+| `POST /auth/register`·`login` | IP | **10 / 分钟** |
+| `POST /users/me/avatar` | 用户 | **5 / 小时** |
+| 全局兜底 | IP | **300 / 分钟** |
+
+```json
+{
+  "error": {
+    "code": "rate_limited",
+    "msg": "操作太频繁，请 42 秒后重试",
+    "detail": { "retry_after": 42 }
+  }
+}
+```
+
+前端表现：**按钮置灰 + 倒计时**，`retry_after` 秒后自动恢复。**不要静默重试**（用户会以为按钮坏了）。
+⚠️ 不要用头里的 `Retry-After` 做唯一来源 —— **`fetch` 拿它要 `Access-Control-Expose-Headers`**，所以 `detail.retry_after` 才是主路径。
+
+**SSE 断线**：不重发请求，走**恢复**。
+
+```
+每帧都带          id: <递增序号>
+重连时请求头带     Last-Event-ID: 12       ← 后端从 13 号继续推，不重头跑
+```
+
+浏览器原生 `EventSource` 会自动带这个头，但我们**用的是 `fetch` + `ReadableStream`**（`EventSource` 只支持 GET），
+所以要**自己在 `src/lib/sse.ts` 里读 `id:` 并保存**（参考实现见 3.7 ④）。
+🔴 **恢复粒度是"节点"不是"token"** —— 断在一个模型节点中途时，那一段会重新打字，这是预期行为不是 bug。
+（后端实现排在 M6；前端现在就要把 `id:` 存下来，否则 M6 加恢复功能时前端要返工。）
+
+**头像上传**（`POST /users/me/avatar`，M9 落地）：
+
+| 项 | 约定 |
+|---|---|
+| 上限 | **10MB**（前端可以先拦一道，给出中文提示，省一次往返） |
+| 类型 | `image/jpeg` · `image/png` · `image/webp`——🔴 **不接受 SVG、GIF**（前端 `accept` 属性也要照这个写） |
+| 前端**不需要**压缩 | 后端会统一重编码为 **512×512 WebP**（10MB → 约 30~60KB）。前端压缩是重复劳动，且压得不如后端稳 |
+| 返回 | 重编码后的**新 URL** —— 前端要**用返回值刷新头像**，不能继续用本地 `File` 的 blob URL（刷新页面就没了） |
 
 ---
 
@@ -173,7 +235,8 @@ Authorization: Bearer <token>
 
 - 响应 `Content-Type: text/event-stream`，**HTTP 状态恒为 200**（流里出错也是 200，错误走 `error` 事件）
 - 后端行为：把消息存进 `messages` → checkpointer 恢复该会话状态 → `graph.astream_events(...)` → 边跑边转 SSE
-- 同一个 `session_id` **同时只允许一个在跑的流**；重复发起 → 新流开始前先中断旧的（或返回 `429`，二选一，M6 时定）
+- 同一个 `session_id` **同时只允许一个在跑的流**；重复发起 → **返回 `429` `rate_limited`**（已定，见 1.5）。
+  前端**不要**在流还在跑时让"发送"按钮可点 —— 先本地置灰，429 只是兜底
 
 ### 3.2 `PATCH /trips/{id}` —— 确定性重算
 
@@ -456,6 +519,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 raise AppError("not_found", "会话不存在", 404)
 raise AppError("invalid_param", "arrive 必须是 HH:MM", 400)
 raise AppError("amap_error", "高德接口限流，已重试 3 次仍失败", 503)
+raise RateLimited("操作太频繁", retry_after=42)   # -> 429 + Retry-After: 42 + detail.retry_after
 ```
 
 FastAPI 默认的 `{"detail": ...}` 必须被 exception handler 改写成 `ErrorBody`，
@@ -488,8 +552,12 @@ FastAPI 默认的 `{"detail": ...}` 必须被 exception handler 改写成 `Error
 
 | 项 | 状态 |
 |---|---|
-| 幂等/重试的具体策略（`PATCH` 带 `If-Match` 版本号？） | ❌ 未定。现阶段单用户、本地跑，**不加**。多端编辑同一行程时才会成为问题 |
+| 幂等/重试的具体策略 | ✅ **已定**（1.5）：**只重试天然幂等的操作**，退避 1s→2s→4s 最多 3 次，`400/401/403` 不重试。**不引 `If-Match` 版本号** —— 单用户本地跑，多端编辑才需要 |
+| SSE 断线恢复 | ✅ **契约已定**（1.5）：`id:` 帧 + `Last-Event-ID`，走 checkpoint 恢复不重发。**代码排 M6** |
 | WebSocket vs SSE | ✅ SSE（单向够用）。**不需要双向**：用户消息走 POST，agent 消息走 SSE |
-| 限流阈值 | ❌ 未定，M5 定（软限流，按用户+IP） |
-| 文件上传的大小/类型限制 | ❌ 未定，M9 定（头像：≤2MB，`image/png\|jpeg\|webp`） |
-| 移动端 | ❌ 不做（只保证 1440px）。见 `界面设计.md` 六节 |
+| 限流阈值 | ✅ **已定**（1.5 表 + `DECISIONS.md` D28）：按接口成本分层，最贵的 `chat` 10/小时·30/天，并发流同时 1 个。**M5 实现** |
+| 文件上传的大小/类型限制 | ✅ **已定**（1.5）：**10MB**，`jpeg`/`png`/`webp`（**不收 SVG/GIF**），后端强制重编码为 512×512 WebP。**M9 实现** |
+| 移动端 | ✅ **不做**（`DECISIONS.md` D30）：最佳 1440px / 最小 1024px，**只做桌面网页端**。窄屏加一层"请在电脑上打开"提示 |
+
+**这份契约里唯一还没定的东西**：`AMAP_JS_KEY` 的真伪 —— **服务端验不了**（实测，
+`DECISIONS.md` D24），只能到 M2 在浏览器里看报不报 `INVALID_USERKEY`。
