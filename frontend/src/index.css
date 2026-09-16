@@ -1,0 +1,170 @@
+@import "tailwindcss";
+
+/* ════════════════════════════════════════════════════════════
+   设计 token（几何拼贴风 · 用户多轮验收定稿）
+   ════════════════════════════════════════════════════════════ */
+@theme {
+  /* 基础 */
+  --color-ink: #1A1A1A;          /* 主文字 / 描边，近黑 */
+  --color-muted: #6B7280;        /* 次要文字 */
+
+  /* 装饰色（可以随便用在色块、标签） */
+  --color-pop-red: #FF6B6B;
+  --color-pop-cyan: #4ECDC4;
+  --color-pop-yellow: #FFD93D;
+  --color-pop-green: #6BCB77;
+  --color-pop-blue: #4D96FF;
+
+  /* 🔴 校验三态 —— 独立定义，禁止复用上面的装饰色 */
+  --color-status-pass: #16A34A;
+  --color-status-fail: #DC2626;
+  --color-status-unknown: #D97706;
+
+  /* 🔴 三层字体栈 —— Space Grotesk 不含中文字形，缺 fallback 中文标题会掉档次 */
+  --font-display: 'Space Grotesk', 'Noto Sans SC', system-ui, sans-serif;
+  --font-sans: 'Noto Sans SC', system-ui, sans-serif;
+}
+
+/* ── 基础 ─────────────────────────────────────────────── */
+html { background: #fff; }
+body {
+  font-family: var(--font-sans);
+  color: var(--color-ink);
+  background: #fff;
+  -webkit-font-smoothing: antialiased;
+  font-size: 14px;
+}
+* { box-sizing: border-box; }
+
+/* 页面骨架：1440px 桌面端，不做响应式 */
+.page {
+  width: 1440px;
+  margin: 0 auto;
+  position: relative;
+  overflow: hidden;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+.page-main { flex: 1; position: relative; }
+
+/* 标题：Space Grotesk 粗体 + 大写 + 宽字距（仅西文），中文走 Noto Sans SC */
+.display {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+/* ── 卡片：白底 + 1px 描边 + 直角到 4px ────────────────── */
+.card {
+  background: #fff;
+  border: 1px solid var(--color-ink);
+  border-radius: 4px;
+}
+
+/* ── 凸起 = 实心色块错位（无投影）────────────────────── */
+.raise { position: relative; }
+.raise::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translate(8px, 8px);
+  border: 1px solid var(--color-ink);
+  border-radius: 4px;
+  z-index: -1;
+  background: var(--color-pop-yellow);
+}
+.raise-red::after   { background: var(--color-pop-red); }
+.raise-cyan::after  { background: var(--color-pop-cyan); }
+.raise-blue::after  { background: var(--color-pop-blue); }
+.raise-green::after { background: var(--color-pop-green); }
+.raise-yellow::after{ background: var(--color-pop-yellow); }
+
+/* ── 黑色实心按钮：轻微 -1° 旋转 ─────────────────────── */
+.btn-black {
+  display: inline-block;
+  background: var(--color-ink);
+  color: #fff;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  text-decoration: none;
+  padding: 14px 28px;
+  border-radius: 4px;
+  border: 1px solid var(--color-ink);
+  transform: rotate(-1deg);
+  cursor: pointer;
+  transition: background 120ms ease, transform 120ms ease;
+}
+.btn-black:hover { background: var(--color-pop-blue); }
+.btn-black:disabled {
+  background: #9ca3af;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* 次级按钮：白底描边，hover 填充黄 */
+.btn-outline {
+  display: inline-block;
+  background: #fff;
+  color: var(--color-ink);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 10px 20px;
+  border-radius: 4px;
+  border: 1px solid var(--color-ink);
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.btn-outline:hover { background: var(--color-pop-yellow); }
+.btn-outline:disabled { opacity: .45; cursor: not-allowed; }
+
+/* ── 装饰元素库：只放页面边角留白处，不贴内容 ──────────── */
+.deco { position: absolute; pointer-events: none; }
+.deco-circle { border-radius: 50%; }
+.deco-tri { clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.deco-ring { border-radius: 50%; border: 3px solid var(--color-ink); }
+.deco-dots {
+  background-image: radial-gradient(var(--color-ink) 2.5px, transparent 2.5px);
+  background-size: 16px 16px;
+}
+.deco-half { border-radius: 0 50% 50% 0; }
+.deco-square { border: 2px solid var(--color-ink); }
+
+/* ── 三态通用胶囊（语义色，独立于装饰色板）──────────────── */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 2px;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+.status-pass    { color: var(--color-status-pass); }
+.status-fail    { color: var(--color-status-fail); }
+.status-unknown { color: var(--color-status-unknown); }
+
+/* 窄屏提示（不做移动端，只挡一下） */
+.mobile-only-note {
+  display: none;
+}
+@media (max-width: 767px) {
+  .mobile-only-note { display: flex; }
+  .page { display: none; }
+}
+
+/* 打字机光标 */
+.type-cursor::after {
+  content: '▌';
+  animation: blink 1s step-end infinite;
+  color: var(--color-ink);
+}
+@keyframes blink { 50% { opacity: 0; } }

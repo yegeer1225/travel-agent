@@ -47,3 +47,4 @@ desktop.ini
 
 # ---- AI 助手的工作目录（不属于项目源码）----
 .workbuddy/
+.env.bak
