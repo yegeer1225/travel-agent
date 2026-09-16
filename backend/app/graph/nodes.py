@@ -11,10 +11,13 @@ L1  会话层   ① 图外面（M6 的 FastAPI 每次 invoke）—— 本文件�
            ③ generate_plan
            ↓
            L3  校验层   ④ check_plan ─ 不通过 → ⑤ repair → 回 ②
-                              └ 通过 → ⑥ render
+                              └ 通过 / 超限降级 ↓
+                              ⑥ soft_check ─ 软判据，**只提醒不打回**
+                                    ↓
+                              ⑦ render
 ```
 
-另外两个节点 ⑦ `parse_intent` / ⑧ `ask_more` 在 L2 之前，负责"能不能开工"。
+另外两个节点 ⑧ `parse_intent` / ⑨ `ask_more` 在 L2 之前，负责"能不能开工"。
 
 ═══════════════════════════════════════════════════════════════
  三个必须在这里兑现的实测结论
@@ -68,6 +71,7 @@ from app.graph.intent import (
     merge_requirements,
     parse_intent_json,
 )
+from app.graph.soft import run_soft_checks
 from app.graph.validate import validate_trip
 from app.providers.base import AmapProvider
 from app.schemas import (
@@ -292,10 +296,10 @@ def build_plan_prompt(req: Requirements, pool: PoiPool, hint: str | None = None)
 
 @dataclass
 class Nodes:
-    """8 个节点 + 它们共用的依赖。
+    """9 个节点 + 它们共用的依赖。
 
-    做成一个类而不是 8 个模块级函数，是为了让**依赖可见**：
-    图要跑起来必须凑齐 provider / 三个 LLM / 三个工具，
+    做成一个类而不是 9 个模块级函数，是为了让**依赖可见**：
+    图要跑起来必须凑齐 provider / 四个 LLM / 三个工具，
     这些在 `graph.py` 里一次性组装，节点函数本身不带全局状态，
     测试里可以整体替换（塞 mock provider、塞假 LLM）。
     """
@@ -305,6 +309,11 @@ class Nodes:
     llm_tool: BaseChatModel
     llm_plan: BaseChatModel
     llm_extract: BaseChatModel
+    llm_soft: BaseChatModel
+    """给 `soft_check`（软判据，D45）。**它是唯一一个"锦上添花"的 LLM 调用** ——
+    所以要能整个换掉（测试里塞假 LLM 或塞一个必抛异常的假 LLM，
+    验证"软判据挂了不影响行程产出"）。"""
+
     today: Date | None = None
     """测试注入固定"今天"。**生产代码不要传** —— 它存在的唯一理由是
     让"相对日期换算"和"日期不能是过去"这两条可被断言。"""
@@ -716,7 +725,53 @@ class Nodes:
         }
 
     # ══════════════════════════════════════════════════════════
-    #  ⑥ repair —— 打回
+    #  ⑥ soft_check —— 软判据（D45）
+    # ══════════════════════════════════════════════════════════
+
+    async def soft_check(self, state: dict[str, Any]) -> dict[str, Any]:
+        """跑 4 条软判据（LLM 判），**只写提醒，从不打回**。
+
+        为什么是**独立节点、而且在 `check_plan` 之后**：
+
+        | 放法 | 后果 |
+        |---|---|
+        | 塞进 `check_plan` | `check_plan` 每轮都跑 → 打回 2 轮就是 3 次 LLM 调用，而软判据 **fail 又不会让 `blocking` 多一条** → 那两次是纯浪费 |
+        | ✅ 独立节点，挂在 `check_plan` 与 `render` 之间 | 只在**行程定稿前**跑一次（无论正常收尾还是打回超限降级，都会经过它） |
+
+        放错地方的代价不是"慢一点"，是**它永远修不好任何东西**：
+        软判据不打回，所以进打回循环对它毫无意义。
+
+        ⚠️ **失败不写 `state["error"]`**（与 `generate_plan` 的纪律相反，见模块 docstring ②）：
+        那条纪律的出发点是"用户不能什么都拿不到"。而这里如果写 error，
+        就把一份**本来完全可用的行程**废掉了 —— 为了 4 句可有可无的提醒，
+        代价完全不对等。所以这里只记日志字段，行程照常输出。
+        """
+        trip_dump = state.get("trip")
+        if not trip_dump:
+            return {}
+        try:
+            trip = Trip.model_validate(trip_dump)
+        except ValidationError:
+            # 上游已经出过错了（`render` 会再报一次），这里不抢着报
+            return {}
+
+        req = Requirements.model_validate(state.get("requirements") or {}).with_defaults()
+        result = await run_soft_checks(trip, req, self.llm_soft)
+
+        return {
+            "trip": trip.model_dump(mode="json"),
+            # 丢弃清单留在 state 里给 CLI / 评测看 —— 它是"防幻觉闸门实际拦了多少"的唯一观测点
+            "soft_report": {
+                "applied": result.applied,
+                "warnings": result.warnings,
+                "unknown": result.unknown,
+                "dropped": result.dropped,
+                "error": result.error,
+            },
+        }
+
+    # ══════════════════════════════════════════════════════════
+    #  ⑦ repair —— 打回
     # ══════════════════════════════════════════════════════════
 
     async def repair(self, state: dict[str, Any]) -> dict[str, Any]:

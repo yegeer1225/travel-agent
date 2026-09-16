@@ -6,31 +6,35 @@
 
 ```
               ┌──────────────┐
-   entry ───► │ parse_intent │  ⑦ 抽需求
+   entry ───► │ parse_intent │  ⑧ 抽需求
               └──────┬───────┘
                      │ 缺 destination / date？
           ┌──────────┴───────────┐
           │是                     │否
           ▼                       ▼
     ┌───────────┐          ┌────────────┐         ┌───────────┐
-    │ ask_more  │  ⑧       │ agent_step │◄────────┤  repair   │ ⑥
-    └─────┬─────┘          └──────┬─────┘   ⑤     └─────▲─────┘
+    │ ask_more  │  ⑨       │ agent_step │◄────────┤  repair   │ ⑦
+    └─────┬─────┘          └──────┬─────┘         └─────▲─────┘
           │                       │ 模型还要调工具？      │ 有硬错
          END          ┌───────────┴──────────┐          │ 且未超限
                       │是                    │否        │
                       ▼                      ▼          │
                 ┌───────────┐        ┌───────────────┐   │
-                │ tool_step │  ③     │ generate_plan │   │
+                │ tool_step │  ②     │ generate_plan │   │
                 └─────┬─────┘        └───────┬───────┘   │
-                      │ 回 L2                │ ④        │
+                      │ 回 L2                │ ③        │
                       └──► agent_step        ▼          │
                                     ┌────────────────┐   │
                                     │   check_plan   │───┘
                                     └────────┬───────┘
                                              │ 无硬错 / 已达打回上限
                                              ▼
+                                    ┌────────────────┐
+                                    │   soft_check   │ ⑥ 只提醒，不打回
+                                    └────────┬───────┘
+                                             ▼
                                        ┌───────────┐
-                                       │  render   │  ⑨
+                                       │  render   │  ⑤
                                        └─────┬─────┘
                                             END
 ```
@@ -98,7 +102,7 @@ def build_runtime(
     节点本身只依赖 `Nodes` 这个形状，所以测试里可以整个换掉
     （塞 mock provider、塞假 LLM），不需要动图结构。
     """
-    from app.llm import build_extract_llm, build_plan_llm, build_tool_llm
+    from app.llm import build_extract_llm, build_plan_llm, build_soft_llm, build_tool_llm
     from app.providers.mock import MOCK_CITY, MockAmapProvider
 
     if provider is not None:
@@ -127,12 +131,13 @@ def build_runtime(
         llm_tool=build_tool_llm(),
         llm_plan=build_plan_llm(),
         llm_extract=build_extract_llm(),
+        llm_soft=build_soft_llm(),
         today=today,
     )
 
 
 def build_graph(nodes: Nodes) -> CompiledStateGraph:
-    """把 8 个节点和 5 条边接起来。
+    """把 9 个节点和 6 条边接起来。
 
     条件边的路由函数**定义在这里而不是 nodes.py**：
     路由是"图的形状"，属于本文件；节点是"一步做什么"，属于 `nodes.py`。
@@ -185,14 +190,18 @@ def build_graph(nodes: Nodes) -> CompiledStateGraph:
         | ✅ 重排轮数（repair 累加） | 重排 2 次，plan 共跑 3 次 |
 
         后者才是 D25 说的"L3 = 2 轮"。前者会让"上限 2"实际退化成"上限 1"。
+
+        ⚠️ **两个出口都去 `soft_check`，不是 `render`** —— 软判据要写在**定稿的那一版**上。
+        如果让 `repair` 分支绕过它，"打回 2 轮后降级输出"的行程就一条软提醒都没有，
+        而那恰恰是最需要提醒的行程（它有硬错没修好）。
         """
         if not (state.get("blocking") or []):
-            return "render"
+            return "soft_check"
         if (state.get("check_rounds") or 0) >= nodes.max_check_rounds:
             # 🔴 达上限 = **降级输出**，不是失败。剩余风险已经写进
             #    `trip.validation.remaining`，前端会显示为灰色/红色标记。
             #    这里如果改成 raise，用户会拿不到任何东西，比"带着风险的行程"更糟。
-            return "render"
+            return "soft_check"
         return "repair"
 
     # ══════════════════════════════════════════════════════════
@@ -207,6 +216,7 @@ def build_graph(nodes: Nodes) -> CompiledStateGraph:
     builder.add_node("tool_step", nodes.tool_step)
     builder.add_node("generate_plan", nodes.generate_plan)
     builder.add_node("check_plan", nodes.check_plan)
+    builder.add_node("soft_check", nodes.soft_check)
     builder.add_node("repair", nodes.repair)
     builder.add_node("render", nodes.render)
 
@@ -227,8 +237,9 @@ def build_graph(nodes: Nodes) -> CompiledStateGraph:
     builder.add_conditional_edges(
         "check_plan",
         after_check,
-        {"repair": "repair", "render": "render"},
+        {"repair": "repair", "soft_check": "soft_check"},
     )
+    builder.add_edge("soft_check", "render")  # ← 软判据只写提醒，无条件往下走
     builder.add_edge("repair", "agent_step")  # ← L3 的回边（回到 L2，不是回生成）
     builder.add_edge("ask_more", END)
     builder.add_edge("render", END)

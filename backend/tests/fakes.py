@@ -26,6 +26,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import date
 from typing import Any, Sequence
 
@@ -163,11 +164,55 @@ def run(coro):
     return asyncio.run(coro)
 
 
+class BoomChatModel(BaseChatModel):
+    """一调就炸的 LLM。
+
+    用来回答一个**只有端到端才问得出来**的问题：
+    "这个节点挂了，整张图还能不能走完？"
+    `test_nodes.py` 里那种"直接调一个节点函数"的测法答不了它 ——
+    节点自己写 `state["error"]` 和"图还继续往下走"是两回事。
+    """
+
+    _llm_type_override: str = "boom"
+
+    @property
+    def _llm_type(self) -> str:
+        return "boom"
+
+    def _generate(
+        self,
+        messages: list[AnyMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        raise RuntimeError("上游 503")
+
+
+def soft_says(*findings: dict) -> AIMessage:
+    """造一条软判据的模型回复。`soft_says({"code": "queue_time", ...})`。
+
+    单独一个 helper 而不是让每个测试手写 JSON 字符串：**手写必然拼错字段名**
+    （`day` 写成 `day_index`、`status` 写成 `state`），
+    而拼错的表现是"这条被静默丢弃"——测试看着绿，实际什么都没测到。
+    """
+    return AIMessage(content=json.dumps({"findings": list(findings)}, ensure_ascii=False))
+
+
+#: 软判据的**默认**回复：什么都不提醒。
+#:
+#: 为什么要有默认值：绝大多数测试（天气、距离、判据、打回……）跟软判据无关，
+#: 它们不该因为"多了一个 LLM 节点"而红，也不该被迫写一份软判据脚本。
+#: 空 findings 让 `soft_check` 变成**无副作用的过路节点**。
+SOFT_EMPTY = soft_says()
+
+
 def make_nodes(
     *,
     tool_script: Sequence[AnyMessage] | None = None,
     plan_script: Sequence[AnyMessage] | None = None,
     extract_script: Sequence[AnyMessage] | None = None,
+    soft_script: Sequence[AnyMessage] | None = None,
     provider: Any = None,
     today: date | None = None,
     tools: list | None = None,
@@ -183,6 +228,7 @@ def make_nodes(
         llm_tool=ScriptedChatModel(script=list(tool_script or [])),
         llm_plan=ScriptedChatModel(script=list(plan_script or [])),
         llm_extract=ScriptedChatModel(script=list(extract_script or [])),
+        llm_soft=ScriptedChatModel(script=list(soft_script or [SOFT_EMPTY])),
         today=today,
         **kwargs,
     )

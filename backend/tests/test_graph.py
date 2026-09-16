@@ -46,11 +46,13 @@ from app.providers.base import DistanceResult
 from app.providers.mock import MockAmapProvider
 from fakes import (
     POI_IDS,
+    BoomChatModel,
     ai_multi_tool_calls,
     ai_text,
     ai_tool_call,
     make_nodes,
     run,
+    soft_says,
 )
 
 TODAY = date(2026, 9, 16)
@@ -690,3 +692,103 @@ def test_ask_more_is_a_terminal_state():
     edges = {(e.source, e.target) for e in graph.get_graph().edges}
     assert ("ask_more", "__end__") in edges
     assert ("render", "__end__") in edges
+
+
+# ══════════════════════════════════════════════════════════════
+#  软判据（M3 欠账 · D45）
+#
+#  这一节测的是**接线**不是判据本身（判据在 test_soft.py）：
+#  ① 软校验是不是真的挂在定稿路径上  ② 它挂了会不会把图带下水
+# ══════════════════════════════════════════════════════════════
+
+
+def test_soft_check_runs_on_the_final_trip():
+    """跑完整图 → 软判据出现在**最终那一版** `Trip` 的三层 `checks` 里。
+
+    ⚠️ 为什么必须是"最终那一版"：如果把 `soft_check` 挂在 `check_plan` 里，
+    打回重排之后第一次跑出来的软判据会**留在一份已经作废的行程上**，
+    而重排后的新版可能一条都没有 —— 用户看到的提醒和行程对不上。
+    """
+    nodes = _nodes(
+        extract_script=_intent(),
+        tool_script=[_search_all(), ai_text()],
+        plan_script=[ai_text(_draft(POI_IDS[0], POI_IDS[1]))],
+        soft_script=[
+            soft_says(
+                {
+                    "code": "needs_booking",
+                    "status": "fail",
+                    "msg": "这里节假日建议提前确认预约政策",
+                    "day": 1,
+                    "seq": 1,
+                },
+                {"code": "overall_feasible", "status": "pass"},
+            )
+        ],
+    )
+    state = run(_run("去成都", nodes=nodes))
+    trip = state["trip"]
+
+    assert trip["summary"]["soft_warnings"] == 1
+    # ⚠️ 站上同时挂着硬判据（poi_exists / open_today）—— **只挑软判据看**。
+    # 直接断言整个列表会顺带把硬判据也钉住，将来加一条硬判据就红一片。
+    soft_codes = [c["code"] for c in trip["days"][0]["stops"][0]["checks"] if c["level"] == "soft"]
+    assert soft_codes == ["needs_booking"]
+    assert [c["code"] for c in trip["checks"]] == ["overall_feasible"]
+    assert state["soft_report"]["applied"] == 2
+
+
+def test_soft_fail_never_creates_blocking_or_repair():
+    """🔴 软判据 `fail` **不打回** —— 这是"硬软分层"的全部意义。
+
+    如果它进了 `blocking`，agent 会去打回重排一个**它永远修不好**的东西
+    （软判据说的是"建议确认预约政策"，不是行程排错了），
+    白烧 2 轮 LLM 之后还是原样输出。
+    """
+    nodes = _nodes(
+        extract_script=_intent(),
+        tool_script=[_search_all(), ai_text()],
+        plan_script=[ai_text(_draft(POI_IDS[0], POI_IDS[1]))],
+        soft_script=[
+            soft_says(
+                {
+                    "code": "elder_friendly",
+                    "status": "fail",
+                    "msg": "这一天步行量对长辈偏紧，可以考虑减少一站",
+                    "day": 1,
+                }
+            )
+        ],
+    )
+    state = run(_run("去成都", nodes=nodes))
+
+    assert state["trip"]["validation"]["rounds"] == 0, "软判据不该触发打回"
+    assert state["trip"]["summary"]["hard_errors"] == 0
+    assert state["trip"]["summary"]["soft_warnings"] == 1
+
+
+def test_soft_llm_crash_still_produces_a_trip():
+    """🔴 **软判据挂了，行程必须照样出来。**
+
+    这是 `soft_check` 与 `generate_plan` 纪律**相反**的地方：
+    生成节点失败必须写 `state["error"]`（用户不能什么都拿不到），
+    而软判据失败**绝不能**写 —— 那会为了几句可有可无的提醒
+    废掉一份本来完全可用的行程。代价完全不对等。
+
+    用 `BoomChatModel` 而不是"返回脏文本"：真实故障就是超时/503/连接断开，
+    而"返回脏文本"只覆盖了"模型不听话"那一种，测不到异常路径。
+    """
+    nodes = _nodes(
+        extract_script=_intent(),
+        tool_script=[_search_all(), ai_text()],
+        plan_script=[ai_text(_draft(POI_IDS[0], POI_IDS[1]))],
+        soft_script=[],  # 会被下面整个换掉
+    )
+    nodes.llm_soft = BoomChatModel()
+    state = run(_run("去成都", nodes=nodes))
+
+    assert not state.get("error"), f"软判据挂了不该让整次请求变成错误：{state.get('error')}"
+    assert state["trip"]["days"], "行程必须仍然产出来"
+    assert state["trip"]["summary"]["soft_warnings"] == 0
+    assert state["soft_report"]["error"], "失败原因要留在账本里，不能静默吞掉"
+    assert all(c["level"] != "soft" for c in state["trip"]["checks"])

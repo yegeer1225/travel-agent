@@ -151,6 +151,7 @@ export interface Trip {
   days: Day[]
   summary: TripSummary
   validation: Validation
+  checks: Check[]
 }
 
 export interface ErrorDetail {
@@ -193,6 +194,7 @@ export interface TripOp {
   day: number
   seq: number
   to_seq: number | null
+  to_day: number | null
   arrive: string | null
   stay_min: number | null
 }

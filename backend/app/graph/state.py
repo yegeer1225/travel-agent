@@ -118,6 +118,17 @@ class TripState(TypedDict, total=False):
     blocking: list[str]
     """**硬错**列表。非空 → `repair`；连续 2 轮仍非空 → 降级输出（D25）。"""
 
+    soft_report: dict[str, Any]
+    """`soft_check` 的账本：`applied` / `warnings` / `unknown` / `dropped` / `error`。
+
+    ⚠️ **这不是给用户看的，是给评测看的。** `dropped` 里的每一条都是
+    "模型写了一句编造的话、被 D45 的铁律闸门拦下"的证据 ——
+    它是"防幻觉机制到底有没有在工作"的唯一观测点（M8 的丢弃率指标数它）。
+
+    为什么放 state 而不是只 log：log 在测试里读不到，
+    而这个数是**行为**（跑了 4 条判据、拦了 1 条），值得被断言。
+    """
+
     repair_hint: str
     """上一次被打回的**原因文本**，回灌给生成节点。
 

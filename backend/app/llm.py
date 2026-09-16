@@ -105,9 +105,36 @@ def build_extract_llm() -> ChatOpenAI:
     )
 
 
+def build_soft_llm() -> ChatOpenAI:
+    """给 `soft_check` 用：**不挂 tools + 关思考 + temperature=0**。
+
+    这是**第四种组合**，但和 `build_extract_llm` 同形。为什么还是单独开一个工厂：
+
+    1. **要可复现**。「这天的步行量对长辈偏不偏紧」不该每次跑出不同结论 ——
+       而思考模式下 `temperature` 失效，等于放弃对它的控制
+    2. **措辞规则要稳定**。它输出的每条 `msg` 都要过 D45 的三条铁律检查，
+       开思考会让措辞发散 → 越界率上升 → 整条被丢弃
+    3. **不需要 CoT**。它做的是"读我们给的事实 + 说一句人话"，
+       推理链在这里不产生被用到的东西
+
+    单独一个函数而不是直接复用 `build_extract_llm`：两者现在同配置是**巧合**，
+    将来分化很正常（比如给软判据换个更便宜的模型、或调 prompt 后需要开思考）。
+    共用会让那次改动变成两个节点一起动。
+
+    ⚠️ 代价：它现在是**唯一会随每次行程多花一次调用**的节点。
+    一次行程 = 工具循环 N 次 + 规划 1 次 + **软判据 1 次**，这一份是固定的。
+    """
+    return _build(
+        settings.llm_model_tool,
+        "disabled",
+        temperature=0,
+    )
+
+
 __all__ = [
     "DEFAULT_TIMEOUT",
     "build_extract_llm",
     "build_plan_llm",
+    "build_soft_llm",
     "build_tool_llm",
 ]

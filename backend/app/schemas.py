@@ -310,6 +310,23 @@ class Trip(BaseModel):
     summary: TripSummary
     validation: Validation = Field(default_factory=Validation)
 
+    checks: list[Check] = Field(default_factory=list)
+    """**行程级判据**（M3 软判据补的字段，D46）。默认空 → 老数据照样能读。
+
+    为什么还要这一层 —— 判据的**主语**有三种，`Stop.checks` 和 `Day.checks` 各盖不住第三种：
+
+    | 落点 | 主语 | 例子 |
+    |---|---|---|
+    | `Stop.checks` | 这个地点 | `poi_exists` / `open_today` / `reachable` / `needs_booking` |
+    | `Day.checks` | 这一天 | `weather_conflict` / `walk_load` / `elder_friendly` |
+    | **`Trip.checks`** | **整份行程** | **`overall_feasible`**（"三天 11 个站，节奏偏满"） |
+
+    ⚠️ 和 `Day.checks` 同一个道理：把行程级判据塞进某一天，
+    会让"这句话说的是整份行程"变成"某一天的问题"——语义被扭曲，
+    而且如果挂在第一天，用户会以为"只要改第一天就行"。
+
+    变更时点同 D37：**发生在前端动手之前**，成本最低。理由见 `DECISIONS.md` D46。"""
+
 
 # ══════════════════════════════════════════════════════════════
 #  三、后端内部结构 —— 高德返回值的「清洗后」形态
@@ -601,6 +618,10 @@ class TripOp(BaseModel):
 
     💡 **只做这三个。** "加一站"走对话（对 agent 说"加个青城山"），
     不在界面上做 —— 否则前端要自己实现"从候选池里挑一个 POI"，等于把选点逻辑搬前端。
+
+    🔴 **`move` 支持跨天**（D44 / A41）。跨天不是"多一个参数"这么轻 ——
+    它会让**所有依赖日期的东西失效**：`Day.weather`、`open_today` 判据、
+    跨天段判据、整条时间轴。重算清单见 `docs/api.md` 3.2。
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -609,6 +630,14 @@ class TripOp(BaseModel):
     day: int = Field(ge=1)
     seq: int = Field(ge=1)  # 目标站当前的序号
     to_seq: int | None = Field(default=None, ge=1)  # 仅 move：移到哪个序号
+    to_day: int | None = Field(default=None, ge=1)
+    """仅 move：**移到哪一天**。留空 = 同日内重排。
+
+    ⚠️ 跨天时 `to_seq` 的语义是"插进目标天之后成为第几站"（1-based）；
+    目标天原有的站会被顺延。**不是"和那一站交换"** —— 交换会让两站的
+    `stay_min` / `arrive` 跟着串位，用户看到的是"时间乱了"。
+    """
+
     arrive: HHMM | None = None  # 仅 update_time
     stay_min: int | None = Field(default=None, ge=0)  # 仅 update_time
 

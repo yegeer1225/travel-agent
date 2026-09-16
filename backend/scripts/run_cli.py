@@ -42,21 +42,46 @@ _LINE = "─" * 68
 
 _CHECK_ICON = {"pass": "✅", "fail": "🔴", "unknown": "⚪"}
 
+#: 软判据的图标。**故意和硬判据不一样** ——
+#: 硬判据 `fail` = 行程被拦住了，软判据 `fail` = 一句提醒。
+#: 两者都用 🔴 会让"3 个红标"看起来像"3 个严重错误"，
+#: 而其中 2 个其实只是"建议提前确认预约政策"。
+_SOFT_ICON = {"pass": "✅", "fail": "🔔", "unknown": "⚪"}
+
 
 def _fmt_checks(checks: list[dict]) -> str:
     """判据打成一串 `poi_exists✅ open_today⚪`。
 
     ⚠️ `unknown` 必须有**自己的图标**（⚪）—— 它既不是"通过"也不是"失败"。
        显示成绿色是撒谎，显示成红色是误报。M3 一半的工作量就在这个第三态上。
+
+    ⚠️ 软判据（`level=soft`）用 🔔 不用 🔴 —— 见 `_SOFT_ICON` 的注释。
     """
-    return "  ".join(f"{c.get('code')}{_CHECK_ICON.get(c.get('status'), '?')}" for c in checks)
+    out = []
+    for c in checks:
+        icons = _SOFT_ICON if c.get("level") == "soft" else _CHECK_ICON
+        out.append(f"{c.get('code')}{icons.get(c.get('status'), '?')}")
+    return "  ".join(out)
+
+
+def _issue_lines(checks: list[dict], indent: str = "       ") -> list[str]:
+    """把非 pass 的判据逐条变成行。pass 不要 —— 印了会把输出淹掉。
+
+    ⚠️ **返回行、不要在这里 `print`。** `_fmt_stop` 返回的是一个多行字符串，
+    由调用方统一打印 —— 在这里直接 `print` 会让这几行**先于**那一站的标题出现，
+    读起来像是"提醒挂在上一个站下面"。这个 bug 在只有硬判据时几乎看不出来
+    （非 pass 的硬判据很少），软判据一上就每条都错位。
+    """
+    return [
+        f"{indent}↳ [{chk.get('status')}] {chk['msg']}"
+        for chk in checks
+        if chk.get("status") != "pass" and chk.get("msg")
+    ]
 
 
 def _print_issues(checks: list[dict], indent: str = "       ") -> None:
-    """把非 pass 的判据逐条印出来。pass 不印 —— 印了会把输出淹掉。"""
-    for chk in checks:
-        if chk.get("status") != "pass" and chk.get("msg"):
-            print(f"{indent}↳ [{chk.get('status')}] {chk['msg']}")
+    for line in _issue_lines(checks, indent):
+        print(line)
 
 
 def _fmt_stop(stop: dict) -> str:
@@ -98,7 +123,8 @@ def _fmt_stop(stop: dict) -> str:
     marks = _fmt_checks(stop.get("checks") or [])
     if marks:
         lines.append("     判据：" + marks)
-        _print_issues(stop.get("checks") or [])
+        # ⚠️ `extend` 到 `lines` 里，不要 `print` —— 理由见 `_issue_lines`
+        lines.extend(_issue_lines(stop.get("checks") or []))
     return "\n".join(lines)
 
 
@@ -163,6 +189,12 @@ def print_result(state: dict) -> None:
             for stop in day.get("stops") or []:
                 print(_fmt_stop(stop))
 
+        # 行程级判据（目前只有软判据 `overall_feasible`）—— 主语是"整份行程"，
+        # 所以印在最后，既不挂某天也不挂某站。
+        if trip.get("checks"):
+            print(f"\n【整份行程的判据】{_fmt_checks(trip['checks'])}")
+            _print_issues(trip["checks"], indent="    ")
+
         # ── 三态里最容易被忽略的那一态：单独列一遍 ──
         # 这些判据**既不算通过也不算失败**，看"硬错 0"会以为全都验过了。
         unknown: list[tuple[str, dict]] = []
@@ -174,10 +206,30 @@ def print_result(state: dict) -> None:
                 for chk in stop.get("checks") or []:
                     if chk.get("status") == "unknown":
                         unknown.append((f"第{day['day']}天 {stop['name']}", chk))
+        for chk in trip.get("checks") or []:
+            if chk.get("status") == "unknown":
+                unknown.append(("整份行程", chk))
         if unknown:
             print(f"\n【无法判定（{len(unknown)} 条）—— 数据拿不到，**不算通过**】")
             for where, chk in unknown:
                 print(f"    ⚪ {where}｜{chk.get('code')}：{chk.get('msg')}")
+
+        # ── 软判据的账本：**闸门到底拦了几条** ──
+        # 这是 D45 那三条铁律唯一的观测点。不印出来，"有没有拦住编造"
+        # 就永远只是个说法 —— 而 CLI 存在的意义就是让人能亲眼看到过程。
+        report = state.get("soft_report") or {}
+        if report:
+            line = (
+                f"\n【软判据】写入 {report.get('applied', 0)} 条"
+                f"（提醒 {report.get('warnings', 0)}｜无法判定 {report.get('unknown', 0)}）"
+            )
+            if report.get("dropped"):
+                line += f"｜🔒 拦下 {len(report['dropped'])} 条"
+            print(line)
+            for item in report.get("dropped") or []:
+                print(f"    🔒 丢弃：{item}")
+            if report.get("error"):
+                print(f"    ⚠️ 软校验未完成：{report['error']}")
 
         validation = trip.get("validation") or {}
         if validation.get("remaining"):
