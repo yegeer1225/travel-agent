@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from app.api.main import create_app
 from app.api.ratelimit import GLOBAL_IP, SlidingWindowLimiter
-from conftest import make_trip
+from conftest import auth_header, make_trip
 from fakes_store import BoomTripStore
 
 
@@ -79,6 +79,7 @@ def test_unexpected_exception_becomes_internal_error(stores):
         limiter=SlidingWindowLimiter(),
     )
     c = TestClient(app, raise_server_exceptions=False)
+    c.headers.update(auth_header())  # M9：先过鉴权，这条测的是 500 转换
 
     r = c.get("/api/trips/t-1")
     assert r.status_code == 500

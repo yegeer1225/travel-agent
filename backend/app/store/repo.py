@@ -40,6 +40,7 @@ from app.schemas import (
     TripSource,
     TripSummary,
     TripSummaryItem,
+    UserOut,
 )
 from app.store.db import aware, connect, utc_now
 
@@ -253,4 +254,122 @@ def _loads(value: Any) -> dict:
     return value
 
 
-__all__ = ["SessionRepo", "TripRepo", "DEFAULT_SESSION_TITLE"]
+class UserRecord:
+    """users 表的行对象。**含 password_hash，绝不能直接出网** —— 出网走 `to_out()`。"""
+
+    __slots__ = ("id", "username", "password_hash", "nickname", "email", "avatar", "created_at")
+
+    def __init__(
+        self,
+        id: int,
+        username: str,
+        password_hash: str,
+        nickname: str | None,
+        email: str | None,
+        avatar: str | None,
+        created_at: Any,
+    ) -> None:
+        self.id = id
+        self.username = username
+        self.password_hash = password_hash
+        self.nickname = nickname
+        self.email = email
+        self.avatar = avatar
+        self.created_at = created_at
+
+    def to_out(self) -> "UserOut":
+        """出网白名单：显式挑字段构造 `UserOut`，想多带一个字段都得来这里改。"""
+        return UserOut(
+            id=self.id,
+            username=self.username,
+            nickname=self.nickname,
+            email=self.email,
+            avatar=self.avatar,
+            created_at=aware(self.created_at) or utc_now(),
+        )
+
+
+class UserRepo:
+    """`users` 表（M9）。注册/登录/me 三件事的存储面。
+
+    与 SessionRepo/TripRepo 同款纪律：`user_id`/`id` 都是第一个位置参数（D31），
+    查不到返回 None，路由层转 404/401。
+    """
+
+    def __init__(self, conn_factory: ConnectionFactory | None = None) -> None:
+        self._conn_factory = conn_factory or connect
+
+    def create(
+        self,
+        username: str,
+        password_hash: str,
+        *,
+        nickname: str | None = None,
+    ) -> UserRecord:
+        now = utc_now()
+        with closing(self._conn_factory()) as conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO users (username, password_hash, nickname, created_at) "
+                "VALUES (%s, %s, %s, %s)",
+                (username, password_hash, nickname, now),
+            )
+            uid = cur.lastrowid
+        return UserRecord(
+            id=int(uid), username=username, password_hash=password_hash,
+            nickname=nickname, email=None, avatar=None, created_at=now,
+        )
+
+    def get_by_username(self, username: str) -> UserRecord | None:
+        with closing(self._conn_factory()) as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, username, password_hash, nickname, email, avatar, created_at "
+                "FROM users WHERE username = %s",
+                (username,),
+            )
+            row = cur.fetchone()
+        if row is None:
+            return None
+        return UserRecord(
+            id=int(row["id"]), username=row["username"], password_hash=row["password_hash"],
+            nickname=row["nickname"], email=row["email"], avatar=row["avatar"],
+            created_at=row["created_at"],
+        )
+
+    def get_by_id(self, user_id: int) -> UserRecord | None:
+        with closing(self._conn_factory()) as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, username, password_hash, nickname, email, avatar, created_at "
+                "FROM users WHERE id = %s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+        if row is None:
+            return None
+        return UserRecord(
+            id=int(row["id"]), username=row["username"], password_hash=row["password_hash"],
+            nickname=row["nickname"], email=row["email"], avatar=row["avatar"],
+            created_at=row["created_at"],
+        )
+
+    def update_profile(
+        self,
+        user_id: int,
+        *,
+        nickname: str | None = None,
+        email: str | None = None,
+        avatar: str | None = None,
+    ) -> UserRecord | None:
+        """只更新显式传入的字段（None = 不动）。改完回读，拿不到 = 用户没了。"""
+        with closing(self._conn_factory()) as conn, conn.cursor() as cur:
+            cur.execute(
+                "UPDATE users SET "
+                "nickname = COALESCE(%s, nickname), "
+                "email = COALESCE(%s, email), "
+                "avatar = COALESCE(%s, avatar) "
+                "WHERE id = %s",
+                (nickname, email, avatar, user_id),
+            )
+        return self.get_by_id(user_id)
+
+
+__all__ = ["SessionRepo", "TripRepo", "UserRepo", "UserRecord", "DEFAULT_SESSION_TITLE"]

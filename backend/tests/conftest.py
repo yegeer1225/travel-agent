@@ -13,8 +13,13 @@ from fastapi.testclient import TestClient
 
 from app.api.main import create_app
 from app.api.ratelimit import SlidingWindowLimiter
+from app.api.security import create_token
 from app.schemas import Trip, TripSummary
-from app.store.memory import InMemorySessionStore, InMemoryTripStore
+from app.store.memory import (
+    InMemorySessionStore,
+    InMemoryTripStore,
+    InMemoryUserStore,
+)
 
 
 @pytest.fixture
@@ -22,15 +27,37 @@ def stores() -> tuple[InMemorySessionStore, InMemoryTripStore]:
     return InMemorySessionStore(), InMemoryTripStore()
 
 
+def auth_header(user_id: int = 1) -> dict[str, str]:
+    """M9：给测试客户端注入 `Authorization: Bearer` 头。
+
+    🔴 内存 store 的隔离靠 `WHERE user_id` 语义，token 里的 uid 不需要
+    真的在 users 表里（生产里 JWT 校验也不查库 —— 见 deps.py 注释）。
+    所以默认 uid=1 的 token 就能覆盖 M5~M8 全部测试，行为与"常量 1"时代一致。
+    """
+    token, _ = create_token(user_id)
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _apply_auth(c: TestClient, user_id: int = 1) -> TestClient:
+    c.headers.update(auth_header(user_id))
+    return c
+
+
 @pytest.fixture
-def client(stores) -> TestClient:
+def user_store() -> InMemoryUserStore:
+    return InMemoryUserStore()
+
+
+@pytest.fixture
+def client(stores, user_store) -> TestClient:
     """每个测试一个干净的应用实例（存储与限流计数都从零开始）。"""
     app = create_app(
         session_repo=stores[0],
         trip_repo=stores[1],
+        user_repo=user_store,
         limiter=SlidingWindowLimiter(),
     )
-    return TestClient(app)
+    return _apply_auth(TestClient(app))
 
 
 NOW = datetime(2026, 9, 16, 12, 0, 0, tzinfo=timezone.utc)

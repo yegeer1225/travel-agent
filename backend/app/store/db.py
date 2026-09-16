@@ -40,6 +40,18 @@ from app.config import Settings
 
 _DDL_TABLES: tuple[str, ...] = (
     """
+    CREATE TABLE IF NOT EXISTS users (
+        id            INT AUTO_INCREMENT PRIMARY KEY,
+        username      VARCHAR(32)  NOT NULL,
+        password_hash VARCHAR(100) NOT NULL,
+        nickname      VARCHAR(32)  NULL,
+        email         VARCHAR(128) NULL,
+        avatar        VARCHAR(255) NULL,
+        created_at    DATETIME(6)  NOT NULL,
+        UNIQUE KEY uq_users_username (username)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+    """,
+    """
     CREATE TABLE IF NOT EXISTS sessions (
         id         CHAR(36)     NOT NULL,
         user_id    INT          NOT NULL,

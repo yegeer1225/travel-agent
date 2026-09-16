@@ -25,11 +25,11 @@ from pathlib import Path
 from app.api.errors import register_handlers
 from app.api.ratelimit import GLOBAL_IP, SlidingWindowLimiter, make_dependency
 from app.api.registry import ActiveChatRegistry
-from app.api.routes import chat, health, sessions, trips
+from app.api.routes import auth, chat, health, sessions, trips
 from app.config import settings
 from app.store.db import connect
-from app.store.memory import InMemorySessionStore, InMemoryTripStore
-from app.store.repo import SessionRepo, TripRepo
+from app.store.memory import InMemorySessionStore, InMemoryTripStore, InMemoryUserStore
+from app.store.repo import SessionRepo, TripRepo, UserRepo
 
 # ── CORS（联调用，非契约）─────────────────────────────────────
 # 豆包的前端跑 Vite dev server（localhost:5173），浏览器从那里 fetch /api
@@ -45,6 +45,7 @@ def create_app(
     *,
     session_repo: SessionRepo | InMemorySessionStore | None = None,
     trip_repo: TripRepo | InMemoryTripStore | None = None,
+    user_repo: UserRepo | InMemoryUserStore | None = None,
     limiter: SlidingWindowLimiter | None = None,
     chat_factory: Any | None = None,
 ) -> FastAPI:
@@ -56,8 +57,11 @@ def create_app(
         session_repo = SessionRepo(conn_factory=lambda: connect(settings))
     if trip_repo is None:
         trip_repo = TripRepo(conn_factory=lambda: connect(settings))
+    if user_repo is None:
+        user_repo = UserRepo(conn_factory=lambda: connect(settings))
     app.state.session_repo = session_repo
     app.state.trip_repo = trip_repo
+    app.state.user_repo = user_repo
     app.state.limiter = limiter or SlidingWindowLimiter()
 
     # ── 全局兜底限流（D28：300 / 分钟 · IP）──
@@ -66,6 +70,7 @@ def create_app(
     global_limit = Depends(make_dependency(app.state.limiter, GLOBAL_IP))
 
     app.include_router(health.router, prefix="/api", dependencies=[global_limit])
+    app.include_router(auth.router, prefix="/api", dependencies=[global_limit])
     app.include_router(sessions.router, prefix="/api", dependencies=[global_limit])
     app.include_router(trips.router, prefix="/api", dependencies=[global_limit])
 

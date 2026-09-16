@@ -24,7 +24,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Callable
 
-from fastapi import Depends, Request
+from fastapi import Request
 
 from app.api.deps import get_current_user_id
 from app.api.errors import RateLimited
@@ -97,17 +97,20 @@ GLOBAL_IP = Rule("global_ip", 300, 60, "ip")
 
 
 def make_dependency(limiter: SlidingWindowLimiter, rule: Rule) -> Callable:
-    """造一个 FastAPI 依赖。key = `规则名:scope:标识` —— 不同规则天然不串。"""
+    """造一个 FastAPI 依赖。key = `规则名:scope:标识` —— 不同规则天然不串。
 
-    async def _dep(
-        request: Request,
-        # 🔴 这里必须 `= Depends(...)`：裸参数会被 FastAPI 当成"必填 query 参数"，
-        # 于是每个被限流的路由都多出一个看不见的 user_id 查询参数，
-        # 前端不带就 400 —— 实测冒烟时抓到的。
-        user_id: int = Depends(get_current_user_id),
-    ) -> None:
+    🔴 M9 起用户身份**只在 `scope == "user"` 时才解析**（手动调
+    `get_current_user_id(request)`，不走 Depends）：register/login 这类
+    ip 范围端点发生在登录**之前**，碰 token 校验就是死锁 —— 没 token
+    永远 401，永远注册不了。原来用 `Depends(get_current_user_id)` 时
+    M5~M8 它是常量无所谓，M9 换成真校验后就炸出来了。
+    （Depends 写法的教训仍在：裸 `user_id: int` 参数会被当 query 参数，
+    前端不带就 400 —— 那个坑是实测冒烟抓的。）
+    """
+
+    async def _dep(request: Request) -> None:
         if rule.scope == "user":
-            identifier = str(user_id)
+            identifier = str(get_current_user_id(request))
         elif rule.scope == "ip":
             # request.client 在测试客户端下可能是 None（TestClient 用 "testclient"）
             identifier = (request.client.host if request.client else "unknown")

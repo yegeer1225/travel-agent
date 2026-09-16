@@ -19,6 +19,7 @@ from app import config as app_config
 from app.api import create_app
 from app.api.ratelimit import SlidingWindowLimiter
 from app.llm import _build
+from conftest import auth_header
 from test_chat_route import FakeHandle, fake_factory
 
 MODEL_OK = "deepseek-v4-pro"
@@ -32,7 +33,9 @@ def _client(stores) -> TestClient:
         trip_repo=stores[1],
         limiter=SlidingWindowLimiter(),
     )
-    return TestClient(app)
+    c = TestClient(app)
+    c.headers.update(auth_header())  # M9：默认用户 uid=1
+    return c
 
 
 # ── 1. 正常路径：model 落库 + 全链路带回 ──
@@ -99,6 +102,7 @@ def test_chat_passes_session_model_to_factory(stores):
         chat_factory=fake_factory(handle, seen_models=seen),
     )
     client = TestClient(app)
+    client.headers.update(auth_header())
     sid = client.post("/api/sessions", json={"model": MODEL_OK}).json()["session_id"]
 
     with client.stream("POST", f"/api/sessions/{sid}/chat", json={"message": "成都两日游"}) as r:

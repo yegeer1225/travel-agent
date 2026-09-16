@@ -145,6 +145,13 @@ class Settings:
     llm_bailian_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     """百炼 OpenAI 兼容端点。"""
 
+    # ---- 鉴权（M9）----
+    jwt_secret: str = ""
+    """HS256 签名密钥。**生产必填**（`_require`），空 = 只在测试内存环境可用。"""
+    auth_token_ttl_hours: int = 168
+    """token 有效期（小时）。默认 7 天 —— 不做 refresh（api.md 第一节定死），
+    过期就让用户重登，短得离谱或长得离谱都不好。"""
+
     # ---- 派生量 ----
     @property
     def mock_mode(self) -> bool:
@@ -230,6 +237,8 @@ def _build() -> Settings:
         llm_bailian_base_url=_optional(
             "LLM_BAILIAN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"
         ),
+        jwt_secret=_optional("JWT_SECRET"),
+        auth_token_ttl_hours=int(_optional("AUTH_TOKEN_TTL_HOURS", "168")),
         amap_provider=provider,
         # ⚠️ mock 模式下不校验高德 Key：M1 阶段（以及豆包并行开工时）不需要真 Key
         amap_webservice_key=(

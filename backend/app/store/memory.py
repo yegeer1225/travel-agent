@@ -17,11 +17,74 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.schemas import ChatMessage, MessageMeta, MessageRole, Session, Trip, TripSummaryItem
-from app.store.repo import DEFAULT_SESSION_TITLE
+from app.store.repo import DEFAULT_SESSION_TITLE, UserRecord
 
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+class InMemoryUserStore:
+    """进程内字典版 users（M9）。接口与 UserRepo 逐一对应，测试用。"""
+
+    def __init__(self) -> None:
+        self._rows: dict[int, dict] = {}
+        self._next_id = 1
+
+    def create(
+        self,
+        username: str,
+        password_hash: str,
+        *,
+        nickname: str | None = None,
+    ) -> UserRecord:
+        uid = self._next_id
+        self._next_id += 1
+        now = _now()
+        self._rows[uid] = {
+            "id": uid, "username": username, "password_hash": password_hash,
+            "nickname": nickname, "email": None, "avatar": None, "created_at": now,
+        }
+        return self.get_by_id(uid)  # type: ignore[return-value]
+
+    def get_by_username(self, username: str) -> UserRecord | None:
+        for r in self._rows.values():
+            if r["username"] == username:
+                return UserRecord(
+                    id=r["id"], username=r["username"], password_hash=r["password_hash"],
+                    nickname=r["nickname"], email=r["email"], avatar=r["avatar"],
+                    created_at=r["created_at"],
+                )
+        return None
+
+    def get_by_id(self, user_id: int) -> UserRecord | None:
+        r = self._rows.get(user_id)
+        if r is None:
+            return None
+        return UserRecord(
+            id=r["id"], username=r["username"], password_hash=r["password_hash"],
+            nickname=r["nickname"], email=r["email"], avatar=r["avatar"],
+            created_at=r["created_at"],
+        )
+
+    def update_profile(
+        self,
+        user_id: int,
+        *,
+        nickname: str | None = None,
+        email: str | None = None,
+        avatar: str | None = None,
+    ) -> UserRecord | None:
+        r = self._rows.get(user_id)
+        if r is None:
+            return None
+        if nickname is not None:
+            r["nickname"] = nickname
+        if email is not None:
+            r["email"] = email
+        if avatar is not None:
+            r["avatar"] = avatar
+        return self.get_by_id(user_id)
 
 
 class InMemorySessionStore:

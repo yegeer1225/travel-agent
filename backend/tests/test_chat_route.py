@@ -20,7 +20,7 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from conftest import make_trip
+from conftest import auth_header, make_trip
 
 from app.api.main import create_app
 from app.api.ratelimit import SlidingWindowLimiter
@@ -78,7 +78,9 @@ def make_client(handle: FakeHandle, stores: tuple) -> TestClient:
         limiter=SlidingWindowLimiter(),
         chat_factory=fake_factory(handle),
     )
-    return TestClient(app)
+    c = TestClient(app)
+    c.headers.update(auth_header())  # M9：默认用户 uid=1
+    return c
 
 
 def fake_factory(handle: FakeHandle, *, seen_models: list | None = None):

@@ -58,6 +58,20 @@ def main() -> int:
     app_a = create_app()
     client = TestClient(app_a)
 
+    print("①.5 注册验收用户并拿 token（M9：所有路由走真 JWT）...")
+    from app.api.security import hash_password
+    from app.store.repo import UserRepo
+
+    user_repo = UserRepo(conn_factory=lambda: connect(settings))
+    if user_repo.get_by_username("verify_user") is None:
+        user_repo.create("verify_user", hash_password("verify-pass-123"), nickname="验收员")
+    # 验收脚本的 app 用的是自己的 UserRepo 实例，但读同一个库 —— 直接签 token
+    from app.api.security import create_token
+
+    verify_uid = user_repo.get_by_username("verify_user").id
+    token, _ = create_token(verify_uid)
+    client.headers.update({"Authorization": f"Bearer {token}"})
+
     print("② 健康检查...")
     r = client.get("/api/health")
     assert r.status_code == 200 and r.json()["ok"], r.text
@@ -71,7 +85,7 @@ def main() -> int:
 
     print("④ 行程落库与读回（Pydantic 往返）...")
     trip = _make_trip("verify-trip-1")
-    TripRepo(conn_factory=lambda: connect(settings)).save(1, trip)
+    TripRepo(conn_factory=lambda: connect(settings)).save(verify_uid, trip)
     got = client.get("/api/trips/verify-trip-1")
     assert got.status_code == 200 and got.json()["title"] == "验收行程", got.text
     items = client.get("/api/trips").json()
@@ -81,6 +95,7 @@ def main() -> int:
     print("⑤ 重启模拟：新 app 实例（= 新进程）里读回来 ...")
     app_b = create_app()
     client_b = TestClient(app_b)
+    client_b.headers.update({"Authorization": f"Bearer {token}"})
     assert client_b.get(f"/api/sessions/{sid}").json()["session"]["title"] == "验收会话", (
         "新实例读不到 = 会话存在进程里 = 重启会丢 —— 存储层有 bug"
     )
@@ -91,6 +106,7 @@ def main() -> int:
     assert client_b.delete(f"/api/sessions/{sid}").status_code == 204
     with connect(settings) as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM trips WHERE id = %s", ("verify-trip-1",))
+        cur.execute("DELETE FROM users WHERE username = %s", ("verify_user",))
     print("   ✓ 已删")
 
     print("\n✅ M5 真库验收全部通过")

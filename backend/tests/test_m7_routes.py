@@ -11,7 +11,7 @@ import json
 
 from fastapi.testclient import TestClient
 
-from conftest import NOW, make_trip
+from conftest import NOW, auth_header, make_trip
 from fakes import SOFT_EMPTY, ai_text, make_nodes, soft_says
 
 from app.api.main import create_app
@@ -35,7 +35,9 @@ def make_client(stores, *, nodes=None, limiter=None) -> TestClient:
     )
     if nodes is not None:
         app.state.nodes = nodes
-    return TestClient(app)
+    c = TestClient(app)
+    c.headers.update(auth_header())  # M9：默认用户 uid=1
+    return c
 
 
 def paste_plan_json(names: list[str], *, destination: str = "成都") -> str:
