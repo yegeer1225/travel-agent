@@ -16,6 +16,9 @@
 from __future__ import annotations
 
 from fastapi import Depends, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 
 from app.api.errors import register_handlers
 from app.api.ratelimit import GLOBAL_IP, SlidingWindowLimiter, make_dependency
@@ -24,6 +27,15 @@ from app.config import settings
 from app.store.db import connect
 from app.store.memory import InMemorySessionStore, InMemoryTripStore
 from app.store.repo import SessionRepo, TripRepo
+
+# ── CORS（联调用，非契约）─────────────────────────────────────
+# 豆包的前端跑 Vite dev server（localhost:5173），浏览器从那里 fetch /api
+# 会先发预检。允许列表只放本地开发源 —— 不放 `*`，因为以后带 JWT 的
+# 请求如果配 credentials，`*` 会直接被浏览器拒。
+DEV_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
 
 
 def create_app(
@@ -54,6 +66,22 @@ def create_app(
     app.include_router(trips.router, prefix="/api", dependencies=[global_limit])
 
     register_handlers(app)
+
+    # ── CORS：只对 /api 生效的判断交给浏览器侧（origin 不在名单就不给头）──
+    # 这是联调配置不是接口契约 —— 生产部署若前后端同源，删掉这两行即可。
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=DEV_ORIGINS,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # ── 冒烟验证页（M5 联调自检，与产品前端无关）──
+    # 单文件、零构建，由后端自己服务（同源，不受 CORS 影响）。
+    # 用途：起服务后浏览器开 /verify，把 M5 读路径+错误形状全打一遍。
+    static_dir = Path(__file__).resolve().parents[2] / "static"
+    if static_dir.is_dir():
+        app.mount("/verify", StaticFiles(directory=static_dir, html=True), name="verify")
     return app
 
 

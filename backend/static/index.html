@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>后端冒烟自检（M5）</title>
+<style>
+  :root { --ok:#6BCB77; --bad:#FF6B6B; --ink:#1a1a1a; }
+  body { font-family: system-ui, "Noto Sans SC", sans-serif; max-width: 760px; margin: 32px auto; padding: 0 16px; color: var(--ink); }
+  h1 { font-size: 20px; border-bottom: 4px solid var(--ink); padding-bottom: 8px; }
+  p.note { color:#555; font-size: 13px; line-height:1.6; }
+  button { background: var(--ink); color:#fff; border:none; padding:10px 22px; font-size:15px; cursor:pointer; }
+  button:disabled { opacity:.4; cursor:wait; }
+  ul { list-style:none; padding:0; }
+  li { padding:8px 10px; border-bottom:1px solid #eee; font-size:14px; display:flex; gap:8px; align-items:baseline; }
+  li .icon { font-weight:bold; width:1.2em; }
+  li.ok .icon { color: var(--ok); }
+  li.bad { background:#fff3f3; }
+  li.bad .icon { color: var(--bad); }
+  li pre { margin:0; font-size:12px; color:#c33; white-space:pre-wrap; word-break:break-all; }
+  #summary { margin-top:16px; font-weight:bold; font-size:15px; }
+</style>
+</head>
+<body>
+<h1>后端冒烟自检（M5 读路径）</h1>
+<p class="note">
+  这是<strong>联调验证工具</strong>，不是产品前端——它从浏览器真实地打一遍 M5 已上线的端点，
+  验证「HTTP 行为」与契约一致（错误形状、404 语义、分页、删除语义）。
+  产品前端由豆包按 <code>前端交接.md</code> 另行实现。<br />
+  用法：后端起服务后打开本页，点「开始自检」。M6 chat SSE 上线后此处会追加 SSE 帧解析检查。
+</p>
+<button id="run">开始自检</button>
+<ul id="list"></ul>
+<div id="summary"></div>
+
+<script>
+const $list = document.getElementById("list");
+const $summary = document.getElementById("summary");
+const $run = document.getElementById("run");
+
+function row(name) {
+  const li = document.createElement("li");
+  li.innerHTML = `<span class="icon">…</span><span>${name}</span>`;
+  $list.appendChild(li);
+  return {
+    pass() { li.className = "ok"; li.querySelector(".icon").textContent = "✓"; },
+    fail(info) {
+      li.className = "bad";
+      li.querySelector(".icon").textContent = "✗";
+      const pre = document.createElement("pre");
+      pre.textContent = info;
+      li.appendChild(pre);
+    },
+  };
+}
+
+/** fetch + 统一解析：返回 {status, body, headers}，网络错也归一成可断言的对象 */
+async function call(method, path, body) {
+  const resp = await fetch(path, {
+    method,
+    headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  let parsed = null;
+  const text = await resp.text();
+  try { parsed = text ? JSON.parse(text) : null; } catch { parsed = { _raw: text.slice(0, 200) }; }
+  return { status: resp.status, body: parsed, headers: resp.headers };
+}
+
+const CHECKS = [
+  {
+    name: "GET /api/health → 200 且 ok=true",
+    async run() {
+      const r = await call("GET", "/api/health");
+      if (r.status !== 200 || r.body?.ok !== true)
+        return `status=${r.status} body=${JSON.stringify(r.body)}`;
+    },
+  },
+  {
+    name: "POST /api/sessions（body 可省）→ 返回 session_id 与 created_at",
+    async run() {
+      const r = await call("POST", "/api/sessions", { title: "冒烟自检" });
+      if (r.status !== 200 && r.status !== 201) return `status=${r.status} body=${JSON.stringify(r.body)}`;
+      if (!r.body?.session_id) return "缺 session_id：" + JSON.stringify(r.body);
+      if (!r.body?.created_at) return "缺 created_at：" + JSON.stringify(r.body);
+      return { sid: r.body.session_id };
+    },
+  },
+  {
+    name: "GET /api/sessions/{id} → SessionDetail（session + messages 数组）",
+    async run(ctx) {
+      const r = await call("GET", `/api/sessions/${ctx.sid}`);
+      if (r.status !== 200) return `status=${r.status} body=${JSON.stringify(r.body)}`;
+      if (r.body?.session?.session_id !== ctx.sid) return "session.session_id 与请求不符";
+      if (!Array.isArray(r.body?.messages)) return "messages 不是数组（M5 恒为空但字段必须在）";
+    },
+  },
+  {
+    name: "GET /api/sessions?limit=20 → Page{items,total,limit,offset}，新建的排最前",
+    async run(ctx) {
+      const r = await call("GET", "/api/sessions?limit=20&offset=0");
+      if (r.status !== 200) return `status=${r.status} body=${JSON.stringify(r.body)}`;
+      const b = r.body;
+      if (!Array.isArray(b?.items) || typeof b?.total !== "number")
+        return "不是 Page 形状：" + JSON.stringify(b);
+      if (b.items[0]?.session_id !== ctx.sid)
+        return `倒序失效：items[0]=${b.items[0]?.session_id}，新建=${ctx.sid}`;
+    },
+  },
+  {
+    name: "DELETE /api/sessions/{id} → 204；再 GET → 404（删除生效）",
+    async run(ctx) {
+      const del = await call("DELETE", `/api/sessions/${ctx.sid}`);
+      if (del.status !== 204) return `DELETE status=${del.status} body=${JSON.stringify(del.body)}`;
+      const again = await call("GET", `/api/sessions/${ctx.sid}`);
+      if (again.status !== 404) return `删除后 GET status=${again.status}（应为 404）`;
+      if (again.body?.error?.code !== "not_found")
+        return "404 不是 ErrorBody 形状：" + JSON.stringify(again.body);
+    },
+  },
+  {
+    name: "GET /api/trips → Page{items,total}（M5 可为空列表）",
+    async run() {
+      const r = await call("GET", "/api/trips");
+      if (r.status !== 200) return `status=${r.status} body=${JSON.stringify(r.body)}`;
+      if (!Array.isArray(r.body?.items) || typeof r.body?.total !== "number")
+        return "不是 Page 形状：" + JSON.stringify(r.body);
+    },
+  },
+  {
+    name: "GET /api/nope → 404 ErrorBody{error:{code:'not_found'}}（不是 {detail}）",
+    async run() {
+      const r = await call("GET", "/api/nope");
+      if (r.status !== 404) return `status=${r.status}`;
+      if (r.body?.detail !== undefined || r.body?.error?.code !== "not_found")
+        return "FastAPI 默认 {detail} 漏网：" + JSON.stringify(r.body);
+    },
+  },
+  {
+    name: "POST /api/sessions 非法 body → 400 invalid_param（校验错误也被改写成 ErrorBody）",
+    async run() {
+      const r = await call("POST", "/api/sessions", { title: 12345 });
+      if (r.status !== 400) return `status=${r.status} body=${JSON.stringify(r.body)}`;
+      if (r.body?.detail !== undefined || r.body?.error?.code !== "invalid_param")
+        return "RequestValidationError 漏网：" + JSON.stringify(r.body);
+    },
+  },
+];
+
+$run.addEventListener("click", async () => {
+  $run.disabled = true;
+  $list.innerHTML = "";
+  $summary.textContent = "";
+  let failed = 0;
+  const ctx = {};
+  for (const check of CHECKS) {
+    const r = row(check.name);
+    let err = null;
+    try { err = await check.run(ctx); }
+    catch (e) { err = `网络/代码异常：${e.message}（后端没起？）`; }
+    if (err) { r.fail(err); failed++; } else { r.pass(); }
+  }
+  $summary.textContent = failed === 0
+    ? `✅ ${CHECKS.length}/${CHECKS.length} 全部通过 —— M5 的 HTTP 行为与契约一致，可以把交接包给豆包了`
+    : `✗ ${failed} 项失败 —— 先修再交接，失败详情见上方红行`;
+  $run.disabled = false;
+});
+</script>
+</body>
+</html>

@@ -41,6 +41,12 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJ1aWQiOjF9.xxx
 理由：前端能 base64 解开 token（是编码不是加密），但**能读到不代表那是给前端用的契约**；
 哪天后端往 payload 里加东西，解 token 的前端就会悄悄依赖上。
 
+### 1.1.1 CORS（联调配置，非契约）
+
+后端已放行 `http://localhost:5173` 与 `http://127.0.0.1:5173`（Vite 默认端口）。
+前端 dev server 起在**其他端口**时提出来加，**不要自己用代理绕**。
+生产部署若前后端同源，后端直接删掉 CORS 中间件。
+
 ### 1.2 错误：所有非 2xx 都是同一个形状
 
 ```json
