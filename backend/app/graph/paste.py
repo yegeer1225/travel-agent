@@ -29,13 +29,14 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
-from app.graph.intent import Requirements
+from app.graph.intent import Requirements, Travelers
 from app.graph.nodes import Nodes
 from app.graph.soft import run_soft_checks
 from app.graph.validate import check_poi_exists, flatten_checks, validate_trip
 from app.schemas import (
     CheckEvent,
     CheckLevel,
+    CheckStatus,
     Day,
     NodeEvent,
     SSEEventType,
@@ -80,10 +81,16 @@ class PasteDayRef(BaseModel):
 
 
 class PastePlan(BaseModel):
-    """LLM 的解析目标。**只有地名，没有 POI id** —— id 必须来自搜索。"""
+    """LLM 的解析目标。**只有地名，没有 POI id** —— id 必须来自搜索。
+
+    `travelers`：粘贴文本里写了"带爸妈/带小孩"就抽出来 —— **判据要看它**：
+    `walk_load`/车程上限在带长辈时阈值更严（8km→5km）。抽不出来 = None = 按无同行人，
+    与"文本没提"的事实一致（不猜）。
+    """
 
     destination: str | None = None
     title: str | None = Field(default=None, max_length=60)
+    travelers: Travelers | None = None
     days: list[PasteDayRef] = Field(min_length=1, max_length=MAX_DAYS)
 
 
@@ -96,9 +103,13 @@ PARSE_SYSTEM_PROMPT = """你是旅游行程解析器。用户会粘贴一段现�
 3. destination = 行程所在城市（正文能看出来就填，看不出来填 null）
 4. title = 给这份行程起一个 20 字以内的标题（基于原文内容，不要夸张）
 5. stay_min = 每站建议停留分钟数；原文说了就用原文，没说用 90
+6. travelers = 同行人构成（adults/children/elders 三个数字 + note）：\
+原文提到"带爸妈/父母/老人"→ elders 至少 1；"带小孩/孩子"→ children 至少 1；\
+没提到的一律 null，**不要猜**
 
 只输出 JSON：
-{"destination": "城市名或null", "title": "标题", "days": [{"theme": "主题或null", "stops": [{"name": "地点名", "stay_min": 90}]}]}"""
+{"destination": "城市名或null", "title": "标题", "travelers": {"adults": 2, "children": null, "elders": null, "note": null}或null, \
+"days": [{"theme": "主题或null", "stops": [{"name": "地点名", "stay_min": 90}]}]}"""
 
 
 def _parse_plan(raw: str) -> PastePlan | None:
@@ -297,7 +308,9 @@ async def paste_trip_stream(
 
     # ── ④ check_plan：硬判据（pool 就是本次搜索攒的）──
     yield _node("check_plan", "start")
-    req = Requirements().with_defaults()
+    # travelers 来自粘贴文本的抽取 —— 不传的话"带爸妈"的行程按 8km 步行上限判，
+    # 长辈更严的 5km 阈值永远不生效（M8 评测 demo case 抓到的缺口）
+    req = Requirements(travelers=plan.travelers).with_defaults()
     report = await validate_trip(trip, pool, req, distance_fn=nodes.provider.calc_distance)
     trip.summary.hard_errors = len(report.blocking)
     trip.validation.remaining = [
@@ -309,8 +322,11 @@ async def paste_trip_stream(
     # ── ⑤ soft_check：软提醒（一次 LLM）──
     yield _node("soft_check", "start")
     await run_soft_checks(trip, req, nodes.llm_soft)
+    # ⚠️ 软判据挂**三层**（站/天/行程顶层，LEVEL_OF 决定）—— 计数必须扫全树。
+    # 只扫 trip.checks 会漏站级 fail（与 recheck 是同一个坑，坑 14 第二次出现）。
     trip.summary.soft_warnings = sum(
-        1 for c in trip.checks if c.level is CheckLevel.SOFT and c.status.value == "fail"
+        1 for c in flatten_checks(trip.model_dump(mode="json"))
+        if c.level is CheckLevel.SOFT and c.status is CheckStatus.FAILED
     )
     yield _node("soft_check", "end", int((time.monotonic() - t0) * 1000))
     yield {"event": CheckEvent(

@@ -1,0 +1,13 @@
+{
+  "id": "demo-coldstart-chengdu-2d",
+  "kind": "coldstart",
+  "title": "演示：成都两日一句话生成（k=2 看一致性）",
+  "source": "AI 写的演示 case，非真实攻略 —— 真实 case 的攒法见 eval/fixtures/README.md",
+  "text": "下周四去成都玩2天，两个人，想吃吃逛逛，安排宽窄巷子、春熙路这一片，节奏别太赶",
+  "k": 2,
+  "today": "2026-09-17",
+  "expect": {
+    "max_days": 2,
+    "min_stops": 3
+  }
+}
