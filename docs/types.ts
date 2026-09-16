@@ -108,6 +108,14 @@ export interface Weather {
   note: string | null
 }
 
+export interface TripSummary {
+  total_distance_km: number
+  total_cost_per_person: number | null
+  stop_count: number
+  hard_errors: number
+  soft_warnings: number
+}
+
 export interface ValidationIssue {
   code: string
   /** 人话，直接显示给用户 */
@@ -123,14 +131,6 @@ export interface Day {
   stops: Stop[]
   day_stats: DayStats | null
   checks: Check[]
-}
-
-export interface TripSummary {
-  total_distance_km: number
-  total_cost_per_person: number | null
-  stop_count: number
-  hard_errors: number
-  soft_warnings: number
 }
 
 export interface Validation {
@@ -229,6 +229,17 @@ export interface UserOut {
   created_at: string
 }
 
+export interface TripSummaryItem {
+  trip_id: string
+  session_id: string | null
+  title: string
+  destination: string
+  source: TripSource
+  created_at: string
+  updated_at: string
+  summary: TripSummary
+}
+
 export interface AmapPoi {
   poi_id: string
   name: string
@@ -312,6 +323,10 @@ export interface ErrorEvent {
 
 export interface ErrorBody {
   error: ErrorDetail
+}
+
+export interface SessionCreateRequest {
+  title: string | null
 }
 
 export interface SessionDetail {

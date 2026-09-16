@@ -1,0 +1,105 @@
+"""InMemory 版 repo —— **与 MySQL 版同签名**，测试与无库环境用。
+
+和 `providers/mock.py` 同一个设计理由：接口层的测试不该连真库
+（`requirements.txt` 里写死的纪律：tests 不连数据库）。
+同签名意味着路由层代码在"测试替身"和"MySQL 实现"之间**零改动**切换 ——
+切换本身只发生在 `deps.py` 的组装点，那一处是唯一需要测真库的地方
+（放 `scripts/verify_mysql_api.py`，Docker 起来后跑）。
+
+⚠️ 用真实 Pydantic 模型存取（不是 dict），这样"repo 返回契约模型"
+这个约定在测试里和真库版行为一致。
+"""
+
+from __future__ import annotations
+
+import uuid
+from datetime import datetime, timezone
+
+from app.schemas import Session, Trip, TripSummaryItem
+from app.store.repo import DEFAULT_SESSION_TITLE
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+class InMemorySessionStore:
+    """进程内字典版 sessions。**顺序语义与 SQL 版对齐**：列表按 updated_at 倒序。"""
+
+    def __init__(self) -> None:
+        self._rows: dict[str, dict] = {}
+
+    def create(self, user_id: int, title: str | None = None, *, session_id: str | None = None) -> Session:
+        now = _now()
+        sid = session_id or uuid.uuid4().hex
+        self._rows[sid] = {"user_id": user_id, "title": title or DEFAULT_SESSION_TITLE, "created_at": now, "updated_at": now}
+        return Session(session_id=sid, title=title or DEFAULT_SESSION_TITLE, created_at=now, updated_at=now)
+
+    def list(self, user_id: int, *, limit: int = 20, offset: int = 0) -> tuple[list[Session], int]:
+        pairs = [(sid, r) for sid, r in self._rows.items() if r["user_id"] == user_id]
+        pairs.sort(key=lambda p: p[1]["updated_at"], reverse=True)
+        items = [
+            Session(
+                session_id=sid, title=r["title"],
+                created_at=r["created_at"], updated_at=r["updated_at"],
+            )
+            for sid, r in pairs[offset : offset + limit]
+        ]
+        return items, len(pairs)
+
+    def get(self, user_id: int, session_id: str) -> Session | None:
+        row = self._rows.get(session_id)
+        if row is None or row["user_id"] != user_id:
+            return None
+        return Session(
+            session_id=session_id, title=row["title"],
+            created_at=row["created_at"], updated_at=row["updated_at"],
+        )
+
+    def delete(self, user_id: int, session_id: str) -> bool:
+        row = self._rows.get(session_id)
+        if row is None or row["user_id"] != user_id:
+            return False
+        del self._rows[session_id]
+        return True
+
+
+class InMemoryTripStore:
+    """进程内字典版 trips。存完整 `Trip` 模型，列表只投影出卡面字段。"""
+
+    def __init__(self) -> None:
+        self._rows: dict[str, dict] = {}
+
+    def save(self, user_id: int, trip: Trip) -> None:
+        now = _now()
+        existing = self._rows.get(trip.trip_id)
+        self._rows[trip.trip_id] = {
+            "user_id": user_id,
+            "trip": trip,
+            "created_at": existing["created_at"] if existing else now,
+            "updated_at": now,
+        }
+
+    def list(self, user_id: int, *, limit: int = 20, offset: int = 0) -> tuple[list[TripSummaryItem], int]:
+        rows = [r for r in self._rows.values() if r["user_id"] == user_id]
+        rows.sort(key=lambda r: r["created_at"], reverse=True)
+        items = []
+        for r in rows[offset : offset + limit]:
+            trip: Trip = r["trip"]
+            items.append(
+                TripSummaryItem(
+                    trip_id=trip.trip_id, session_id=trip.session_id, title=trip.title,
+                    destination=trip.destination, source=trip.source,
+                    created_at=r["created_at"], updated_at=r["updated_at"], summary=trip.summary,
+                )
+            )
+        return items, len(rows)
+
+    def get(self, user_id: int, trip_id: str) -> Trip | None:
+        row = self._rows.get(trip_id)
+        if row is None or row["user_id"] != user_id:
+            return None
+        return row["trip"]
+
+
+__all__ = ["InMemorySessionStore", "InMemoryTripStore"]

@@ -586,6 +586,40 @@ class SessionDetail(BaseModel):
     messages: list[ChatMessage] = Field(default_factory=list)
 
 
+class SessionCreateRequest(BaseModel):
+    """`POST /sessions` 的 body（M5）。
+
+    🔴 `title` 可省 —— 省略时后端给默认标题（"新的行程规划"），
+    **而不是报错**：用户第一句话还没说，哪来的标题？
+    首轮 chat 的意图抽取会把目的地拼进去（M6），那时再改名才符合直觉。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = Field(default=None, max_length=100)
+
+
+class TripSummaryItem(BaseModel):
+    """`GET /trips` 的列表项（M5）—— 个人中心「我的 AI 路线规划记录」的行程卡。
+
+    ⚠️ **刻意不带 `days`**：列表页画不出也用不上完整行程，
+    把 `days` 塞进列表 = 每页 20 份完整行程 JSON 的序列化 + 传输浪费。
+    要看详情走 `GET /trips/{id}`（这也让"列表轻、详情重"成为缓存边界）。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    trip_id: str
+    session_id: str | None = None
+    """归属会话（`source=pasted` 时为 None，A37）。"""
+    title: str
+    destination: str
+    source: TripSource
+    created_at: datetime
+    updated_at: datetime
+    summary: TripSummary
+
+
 class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -926,6 +960,7 @@ __all__ = [
     "DayStats",
     "Day",
     "TripSummary",
+    "TripSummaryItem",
     "ValidationIssue",
     "Validation",
     "Trip",
@@ -950,6 +985,7 @@ __all__ = [
     "MessageMeta",
     "ChatMessage",
     "Session",
+    "SessionCreateRequest",
     "SessionDetail",
     "ChatRequest",
     "PasteTripRequest",

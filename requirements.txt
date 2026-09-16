@@ -47,6 +47,13 @@ pydantic==2.13.5
 python-dotenv==1.2.3
 httpx==0.28.1
 
+# --- HTTP 服务层（M5，2026-09-16 实际跑通的组合锁定）-------------------------
+# fastapi 0.141.1 依赖 starlette 1.6.0（pip 自动带上，显式写出来防漂移）
+fastapi==0.141.1
+starlette==1.6.0
+uvicorn==0.53.0
+# python-multipart 留到 M9（头像上传 multipart/form-data 才需要）
+
 # --- 测试 -------------------------------------------------------------------
 # backend/tests/ 只测纯逻辑，**不连数据库**。
 # 需要起库才能跑的检查一律放 backend/scripts/（先例：check_checkpoint_mysql.py）
