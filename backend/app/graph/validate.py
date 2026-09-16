@@ -489,6 +489,24 @@ async def validate_trip(
     return report
 
 
+def flatten_checks(trip_dump: dict) -> list[Check]:
+    """把 Trip 里散落的 checks 收拢成校验卡的一张列表（三态分组的原料）。
+
+    三个层级：`days[].stops[].checks`（站级硬判据）、`days[].checks`（天级）、
+    `trip.checks`（行程级软判据，M3 加的落点）。
+
+    M7 起从 chat_stream 上移到这里 —— chat 的 check 事件、paste 的 check 事件、
+    `recheck` 响应三处共用同一份收拢规则，改这里等于同时改三处。
+    """
+    out: list[Check] = []
+    for day in trip_dump.get("days") or []:
+        for stop in day.get("stops") or []:
+            out.extend(Check.model_validate(c) for c in stop.get("checks") or [])
+        out.extend(Check.model_validate(c) for c in day.get("checks") or [])
+    out.extend(Check.model_validate(c) for c in trip_dump.get("checks") or [])
+    return out
+
+
 def _describe(day, check: Check) -> str:
     """把一条失败判据说成一句能直接喂给模型的话。
 
@@ -513,6 +531,7 @@ __all__ = [
     "check_poi_exists",
     "check_walk_load",
     "check_weather_conflict",
+    "flatten_checks",
     "is_outdoor",
     "parse_open_windows",
     "validate_trip",

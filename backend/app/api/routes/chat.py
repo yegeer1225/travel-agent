@@ -24,7 +24,6 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -34,6 +33,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from app.api.deps import get_current_user_id, get_session_repo, get_trip_repo
 from app.api.errors import AppError, RateLimited
 from app.api.ratelimit import CHAT_DAILY, CHAT_HOURLY
+from app.api.sse import SSE_HEADERS, frame as _frame  # 帧格式唯一实现点（M7 抽出，paste 复用）
 from app.schemas import (
     CheckEvent,
     DoneEvent,
@@ -46,16 +46,6 @@ from app.schemas import (
 from app.store.repo import DEFAULT_SESSION_TITLE, SessionRepo, TripRepo
 
 router = APIRouter(tags=["chat"])
-
-
-def _frame(seq: int, evt: Any) -> str:
-    """一帧 SSE：`id:` + `data:`（单行 JSON，ensure_ascii=False）+ 空行。
-
-    ⚠️ JSON 里**绝不能有换行**（前端按行切）—— `json.dumps` 默认不会产生
-    换行，前提是喂进来的是 Pydantic 模型 dump 而不是原始文本。
-    """
-    body = json.dumps(evt.model_dump(mode="json"), ensure_ascii=False, separators=(",", ":"))
-    return f"id: {seq}\ndata: {body}\n\n"
 
 
 def _derive_title(session_title: str, trip: Any) -> str | None:
@@ -220,10 +210,7 @@ async def chat(
             session_id=session_id, message=message, resume=resume, has_checkpoint=has_checkpoint,
             session_repo=session_repo, trip_repo=trip_repo, user_id=user_id,
         )
-        return StreamingResponse(stream, media_type="text/event-stream", headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",  # nginx 不缓冲（本地开发用不到，部署时救命）
-        })
+        return StreamingResponse(stream, media_type="text/event-stream", headers=SSE_HEADERS)
     except BaseException:
         registry.finish(session_id)
         raise

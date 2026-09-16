@@ -39,6 +39,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 
 from app.graph.graph import RECURSION_LIMIT, initial_state
+from app.graph.validate import flatten_checks as _flatten_checks  # M7 上移公共化
 from app.schemas import (
     Check,
     CheckEvent,
@@ -103,21 +104,6 @@ def _tool_summary(output: Any) -> str:
     text = output if isinstance(output, str) else json.dumps(output, ensure_ascii=False)
     first_line = text.strip().splitlines()[0] if text.strip() else "（空返回）"
     return first_line[:80]
-
-
-def _flatten_checks(trip_dump: dict[str, Any]) -> list[Check]:
-    """把 Trip 里散落的 checks 收拢成校验卡的一张列表（三态分组的原料）。
-
-    三个层级：`days[].stops[].checks`（站级硬判据）、`days[].checks`（天级）、
-    `trip.checks`（行程级软判据，M3 加的落点）。
-    """
-    out: list[Check] = []
-    for day in trip_dump.get("days") or []:
-        for stop in day.get("stops") or []:
-            out.extend(Check.model_validate(c) for c in stop.get("checks") or [])
-        out.extend(Check.model_validate(c) for c in day.get("checks") or [])
-    out.extend(Check.model_validate(c) for c in trip_dump.get("checks") or [])
-    return out
 
 
 def _summarize_trip(trip: Trip) -> str:

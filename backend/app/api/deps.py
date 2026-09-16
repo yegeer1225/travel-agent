@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import Request
 
 from app.store.memory import InMemorySessionStore, InMemoryTripStore
@@ -28,4 +30,20 @@ def get_trip_repo(request: Request) -> TripRepo | InMemoryTripStore:
     return request.app.state.trip_repo
 
 
-__all__ = ["get_current_user_id", "get_session_repo", "get_trip_repo"]
+def get_nodes(request: Request) -> Any:
+    """Agent 运行时（Nodes：provider + 各 LLM）。M7 paste/recheck 用。
+
+    **懒建**：首次真正用到才组装（构造 ChatOpenAI 不联网，但会读配置 ——
+    惰性让"没有 key 也能起服务跑读路径"保持成立，与 chat_factory 同理）。
+    测试注入 fake（make_nodes）后永远走不到这里。
+    """
+    nodes = getattr(request.app.state, "nodes", None)
+    if nodes is None:
+        from app.graph.graph import build_runtime
+
+        nodes = build_runtime()
+        request.app.state.nodes = nodes
+    return nodes
+
+
+__all__ = ["get_current_user_id", "get_nodes", "get_session_repo", "get_trip_repo"]
