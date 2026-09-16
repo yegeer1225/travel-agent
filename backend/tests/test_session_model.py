@@ -3,7 +3,7 @@
 覆盖四件事：
 1. 建会话带 `model` → 落库 + 响应带回（list/get 同源）
 2. 建会话带**不存在**的模型 → 400 fail-fast
-3. 建会话带**凭据未配**的模型（qwen-plus 无百炼 key）→ 400 fail-fast
+3. 建会话带**凭据未配**的模型（qwen3.7-plus 无百炼 key）→ 400 fail-fast
 4. chat 路由把 `session.model` 透传给 chat_factory（图按模型选）
 5. `_build` 对 `supports_thinking=False` 的模型**剥掉 thinking 参数**（不发，
    不是发 disabled）；凭据按 provider 路由
@@ -24,7 +24,7 @@ from test_chat_route import FakeHandle, fake_factory
 
 MODEL_OK = "deepseek-v4-pro"
 MODEL_BAD = "gpt-99-turbo"
-MODEL_QWEN = "qwen-plus"
+MODEL_QWEN = "qwen3.7-plus"
 
 
 def _client(stores) -> TestClient:
@@ -72,7 +72,7 @@ def test_create_session_unknown_model_rejected(stores):
 
 
 def test_create_session_qwen_without_credentials_rejected(stores, monkeypatch):
-    """qwen-plus 在 registry 里，但百炼 key 没配 → 仍 400（D56 fail-fast）。"""
+    """qwen3.7-plus 在 registry 里，但百炼 key 没配 → 仍 400（D56 fail-fast）。"""
     fresh = dataclasses.replace(app_config.settings, llm_bailian_api_key=None)
     monkeypatch.setattr(app_config, "settings", fresh)
     client = _client(stores)
@@ -81,7 +81,7 @@ def test_create_session_qwen_without_credentials_rejected(stores, monkeypatch):
 
 
 def test_create_session_qwen_with_credentials_ok(stores, monkeypatch):
-    """配上百炼 key 后 qwen-plus 立即可选（registry 名单不改代码）。"""
+    """配上百炼 key 后 qwen3.7-plus 立即可选（registry 名单不改代码）。"""
     fresh = dataclasses.replace(app_config.settings, llm_bailian_api_key="sk-fake")
     monkeypatch.setattr(app_config, "settings", fresh)
     client = _client(stores)
@@ -117,7 +117,7 @@ def test_chat_passes_session_model_to_factory(stores):
 # ── 5. _build：provider 路由 + thinking 参数剥离 ──
 
 def test_build_strips_thinking_for_non_thinking_model(monkeypatch):
-    """qwen-plus（supports_thinking=False）：连 extra_body 都不发，不是发 disabled。"""
+    """qwen3.7-plus（supports_thinking=False）：连 extra_body 都不发，不是发 disabled。"""
     fresh = dataclasses.replace(app_config.settings, llm_bailian_api_key="sk-fake")
     monkeypatch.setattr(app_config, "settings", fresh)
     monkeypatch.setattr("app.llm.settings", fresh)  # llm.py 是 from-import 的绑定

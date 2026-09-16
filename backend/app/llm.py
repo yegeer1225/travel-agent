@@ -36,7 +36,7 @@ DEFAULT_TIMEOUT = 120.0
 def _build(model: str, thinking: str, *, temperature: float | None) -> ChatOpenAI:
     """按 `MODEL_REGISTRY` 的 provider 路由凭据（D56）；思考开关按节点类型传入。
 
-    🔴 `supports_thinking=False` 的模型（qwen-plus）**连 thinking 参数都不发** ——
+    🔴 `supports_thinking=False` 的模型（qwen3.7 系）**连 thinking 参数都不发** ——
     不是发 disabled，是不发（`model_supports_thinking` 里说了为什么别赌兼容层）。
     所以 plan 节点即使 `.env` 配了 enabled，选了 qwen 会话也会被这里剥掉。
     """

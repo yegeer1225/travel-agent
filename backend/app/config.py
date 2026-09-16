@@ -70,7 +70,10 @@ def _flag(name: str, default: bool = False) -> bool:
 MODEL_REGISTRY: dict[str, dict[str, object]] = {
     "deepseek-flash": {"provider": "deepseek", "supports_thinking": True},
     "deepseek-v4-pro": {"provider": "deepseek", "supports_thinking": True},
-    "qwen-plus": {"provider": "bailian", "supports_thinking": False},
+    # 百炼免费额度**按模型独立**（各 100 万 token，90 天）：flash 当工作马（开发+评测），plus 当演示档
+    # 2026-09-16 实测两模型均真实出结果；官方没有 deepseek-v4.1-flash，但 qwen3.7-flash / qwen3.7-plus 确认存在
+    "qwen3.7-flash": {"provider": "bailian", "supports_thinking": False},
+    "qwen3.7-plus": {"provider": "bailian", "supports_thinking": False},
 }
 
 _CREDENTIAL_BY_PROVIDER = {
@@ -89,7 +92,7 @@ def model_provider(model: str) -> str | None:
 def model_available(model: str) -> bool:
     """会话能不能选这个模型（A45/D56）：在 registry **且**对应 provider 凭据已配。
 
-    🔴 名字在 registry ≠ 能用 —— qwen-plus 注册在案但没配百炼 key 时，
+    🔴 名字在 registry ≠ 能用 —— qwen3.7-plus 注册在案但没配百炼 key 时，
     必须在建会话时就 400（fail-fast），不能拖到 chat 运行时才 401。
     """
     provider = model_provider(model)
@@ -100,7 +103,7 @@ def model_available(model: str) -> bool:
 
 
 def model_supports_thinking(model: str) -> bool:
-    """`supports_thinking=False` 的模型（qwen-plus）连 thinking 参数都不该发，
+    """`supports_thinking=False` 的模型（qwen3.7-plus / qwen3.7-flash）连 thinking 参数都不该发，
     不只是发 disabled —— 兼容层对不认识的参数可能报错也可能静默，都别赌。"""
     info = MODEL_REGISTRY.get(model)
     return bool(info and info.get("supports_thinking"))
@@ -140,7 +143,7 @@ class Settings:
     # ---- LLM 多供应商（D56）----
     # ⚠️ 放在数据类尾部：前面有一串无默认字段，frozen dataclass 不允许默认值插中间
     llm_bailian_api_key: str | None = None
-    """百炼（DASHSCOPE）的 key —— **只有会话选了 qwen-plus 才需要**（D56）。
+    """百炼（DASHSCOPE）的 key —— **只有会话选了 qwen3.7 系才需要**（D56）。
     不配不报错；选了没配的模型在建会话时就 400（fail-fast），不会拖到 chat 运行时。"""
     llm_bailian_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     """百炼 OpenAI 兼容端点。"""
