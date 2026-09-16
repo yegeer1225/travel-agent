@@ -80,6 +80,9 @@ class BoomProvider:
     async def search_poi(self, keyword, city=None, limit=10):
         raise RuntimeError("上游炸了")
 
+    async def get_poi(self, poi_id):
+        raise RuntimeError("上游炸了")
+
     async def get_weather(self, city, day):
         raise RuntimeError("上游炸了")
 

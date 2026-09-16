@@ -416,6 +416,13 @@ class MockAmapProvider:
 
         return hits[: max(1, min(limit, 25))]
 
+    async def get_poi(self, poi_id: str) -> AmapPoi | None:
+        """按 poi_id 精确查池子 —— `GET /spots/{poi_id}` 的 mock 数据面。"""
+        for poi in MOCK_POI_POOL:
+            if poi.poi_id == poi_id:
+                return poi
+        return None
+
     async def get_weather(self, city: str, day: date) -> Weather:
         if city and MOCK_CITY not in city:
             return Weather(

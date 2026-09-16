@@ -85,3 +85,17 @@ async def search_spots(
         source="mock" if getattr(provider, "name", "real") == "mock" else "amap",
         cached=cached,
     )
+
+
+@router.get("/spots/{poi_id}", response_model=SpotCard)
+async def get_spot(
+    request: Request,
+    poi_id: str,
+    user_id: int = Depends(get_current_user_id),
+) -> SpotCard:
+    """POI 详情（M8 契约）。查不到 = 404（`not_found`，与全局 404 语义一致）。"""
+    provider = get_nodes(request).provider
+    poi = await provider.get_poi(poi_id)
+    if poi is None:
+        raise AppError("not_found", "景点不存在", 404)
+    return _to_spot_card(poi)

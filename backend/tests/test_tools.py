@@ -161,6 +161,9 @@ class ScriptedSearchProvider:
         self.limits.append(limit)
         return self.pois[:limit]
 
+    async def get_poi(self, poi_id: str):  # pragma: no cover - 用不到
+        return next((p for p in self.pois if p.poi_id == poi_id), None)
+
     async def get_weather(self, city: str, day: date):  # pragma: no cover - 用不到
         raise NotImplementedError
 

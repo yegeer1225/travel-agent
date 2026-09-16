@@ -397,6 +397,18 @@ class AmapHttpProvider:
 
         return parsed[:limit]
 
+    async def get_poi(self, poi_id: str) -> AmapPoi | None:
+        """`/v3/place/detail` 按 id 精确查。查不到（`pois: []`）返回 None。"""
+        payload = await self._request("/v3/place/detail", id=poi_id)
+        raws = payload.get("pois")
+        raws = raws if isinstance(raws, list) else []
+        for raw in raws:
+            if isinstance(raw, dict):
+                poi = parse_poi(raw)
+                if poi is not None:
+                    return poi
+        return None
+
     async def get_weather(self, city: str, day: date) -> Weather:
         """地理编码 → 天气。**两步合成一个方法**，不额外增加工具数量（A7 只有 3 个工具）。"""
         city = (city or "").strip()

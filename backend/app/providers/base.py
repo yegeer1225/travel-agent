@@ -57,6 +57,15 @@ class AmapProvider(Protocol):
         """
         ...
 
+    async def get_poi(self, poi_id: str) -> AmapPoi | None:
+        """按 poi_id 精确查一个地点（`GET /spots/{poi_id}` 的数据面）。
+
+        查不到返回 `None`（路由层转 404）。real 走 `/v3/place/detail`；
+        mock 直接查池子。⚠️ 与 `search_poi` 同一条规矩：限流响应必须重试，
+        不能让它冒充"查不到"。
+        """
+        ...
+
     async def get_weather(self, city: str, day: date) -> Weather:
         """查某天的天气。
 

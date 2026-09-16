@@ -42,6 +42,9 @@ class FakeProvider:
         hits = [p for p in self.pois if keyword in p.name or keyword in p.alias]
         return hits[:limit]
 
+    async def get_poi(self, poi_id: str):
+        return next((p for p in self.pois if p.poi_id == poi_id), None)
+
     async def get_weather(self, *a, **kw):  # pragma: no cover
         raise NotImplementedError
 
@@ -127,6 +130,24 @@ def test_search_cache_flag(api):
 def test_search_requires_auth(api):
     bare = TestClient(api.app)
     assert bare.get("/api/spots/search", params={"keywords": "宽窄"}).status_code == 401
+
+
+# ── /spots/{poi_id} ────────────────────────────────────────
+
+
+def test_get_spot_by_id(api):
+    r = api.get("/api/spots/B1")
+    assert r.status_code == 200
+    card = r.json()
+    assert card["poi_id"] == "B1" and card["name"] == "宽窄巷子景区"
+    assert card["lng"] == 104.05  # SpotCard 精简卡，不含 open_time 等内部字段
+    assert "open_time" not in card
+
+
+def test_get_spot_unknown_404(api):
+    r = api.get("/api/spots/NOT_EXIST")
+    assert r.status_code == 404
+    assert r.json()["error"]["code"] == "not_found"
 
 
 # ── /home ──────────────────────────────────────────────────
