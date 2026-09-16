@@ -863,10 +863,20 @@ class LikeState(BaseModel):
 
 
 class FavoriteCreateRequest(BaseModel):
+    """收藏。`name`/`cover` 是 **poi 目标的快照**（`FavoriteRepo` 注释）：
+
+    - guide：后端自己从 `guides` 表取标题/封面，传了也**忽略**
+    - poi：我们没有本地 POI 库（A31），名字只存在于收藏那一瞬 →
+      前端从当前 SpotCard 传 `name`（必传，缺了 400）
+    - comment：后端取评论内容前 50 字
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     target_type: TargetType
     target_id: str
+    name: str | None = Field(default=None, max_length=200)
+    cover: str | None = None
 
 
 class FavoriteItem(BaseModel):

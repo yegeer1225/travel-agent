@@ -207,7 +207,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJ1aWQiOjF9.xxx
 | POST | `/likes/toggle` | M11 🟢 | **点赞/取消二合一** → `LikeState` |
 | GET | `/likes?target_type=&target_id=` | M11 🟢 | 查状态 → `LikeState`（列表页要显示"赞 12"） |
 | GET | `/favorites?target_type=` | M9 🟢 | 我的收藏 → `Page<FavoriteItem>` |
-| POST | `/favorites` | M9 🟢 | 收藏。body `FavoriteCreateRequest` → `FavoriteItem` |
+| POST | `/favorites` | M9 🟢 | 收藏。body `FavoriteCreateRequest`（guide/comment 的 name 后端自己解析；**poi 必传 `name`** —— 收藏时刻的快照，无本地 POI 库）→ `FavoriteItem` |
 | DELETE | `/favorites/{target_type}/{target_id}` | M9 🟢 | 取消收藏 → `204` |
 
 ### 2.7 用户 / 鉴权

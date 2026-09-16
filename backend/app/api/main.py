@@ -26,9 +26,18 @@ from app.api.errors import register_handlers
 from app.api.ratelimit import GLOBAL_IP, SlidingWindowLimiter, make_dependency
 from app.api.registry import ActiveChatRegistry
 from app.api.routes import auth, chat, health, sessions, trips
+from app.api.routes import favorites, guides, home, spots, uploads
 from app.config import settings
 from app.store.db import connect
-from app.store.memory import InMemorySessionStore, InMemoryTripStore, InMemoryUserStore
+from app.store.memory import (
+    InMemoryCommentStore,
+    InMemoryFavoriteStore,
+    InMemoryGuideStore,
+    InMemoryLikeStore,
+    InMemorySessionStore,
+    InMemoryTripStore,
+    InMemoryUserStore,
+)
 from app.store.repo import SessionRepo, TripRepo, UserRepo
 
 # ── CORS（联调用，非契约）─────────────────────────────────────
@@ -46,6 +55,10 @@ def create_app(
     session_repo: SessionRepo | InMemorySessionStore | None = None,
     trip_repo: TripRepo | InMemoryTripStore | None = None,
     user_repo: UserRepo | InMemoryUserStore | None = None,
+    guide_repo: Any | None = None,
+    comment_repo: Any | None = None,
+    like_repo: Any | None = None,
+    favorite_repo: Any | None = None,
     limiter: SlidingWindowLimiter | None = None,
     chat_factory: Any | None = None,
 ) -> FastAPI:
@@ -59,9 +72,29 @@ def create_app(
         trip_repo = TripRepo(conn_factory=lambda: connect(settings))
     if user_repo is None:
         user_repo = UserRepo(conn_factory=lambda: connect(settings))
+    if guide_repo is None:
+        from app.store.repo import GuideRepo
+
+        guide_repo = GuideRepo(conn_factory=lambda: connect(settings))
+    if comment_repo is None:
+        from app.store.repo import CommentRepo
+
+        comment_repo = CommentRepo(conn_factory=lambda: connect(settings))
+    if like_repo is None:
+        from app.store.repo import LikeRepo
+
+        like_repo = LikeRepo(conn_factory=lambda: connect(settings))
+    if favorite_repo is None:
+        from app.store.repo import FavoriteRepo
+
+        favorite_repo = FavoriteRepo(conn_factory=lambda: connect(settings))
     app.state.session_repo = session_repo
     app.state.trip_repo = trip_repo
     app.state.user_repo = user_repo
+    app.state.guide_repo = guide_repo
+    app.state.comment_repo = comment_repo
+    app.state.like_repo = like_repo
+    app.state.favorite_repo = favorite_repo
     app.state.limiter = limiter or SlidingWindowLimiter()
 
     # ── 全局兜底限流（D28：300 / 分钟 · IP）──
@@ -73,6 +106,11 @@ def create_app(
     app.include_router(auth.router, prefix="/api", dependencies=[global_limit])
     app.include_router(sessions.router, prefix="/api", dependencies=[global_limit])
     app.include_router(trips.router, prefix="/api", dependencies=[global_limit])
+    app.include_router(spots.router, prefix="/api", dependencies=[global_limit])
+    app.include_router(home.router, prefix="/api", dependencies=[global_limit])
+    app.include_router(uploads.router, prefix="/api", dependencies=[global_limit])
+    app.include_router(favorites.router, prefix="/api", dependencies=[global_limit])
+    app.include_router(guides.router, prefix="/api", dependencies=[global_limit])
 
     # ── M6：chat SSE ──
     # chat_factory 默认 = 真 LangGraph + AIOMySQLSaver（懒建，见 chat_stream.py）；
@@ -105,6 +143,14 @@ def create_app(
     static_dir = Path(__file__).resolve().parents[2] / "static"
     if static_dir.is_dir():
         app.mount("/verify", StaticFiles(directory=static_dir, html=True), name="verify")
+
+    # ── 头像静态服务（M9 后半）── uploads/avatars/ 由 uploads.py 落盘，
+    # 这里以 /uploads 挂出去 —— 返回给前端的 url 就是 /uploads/avatars/xxx.webp。
+    # 🔴 启动时就 mkdir：不能等首次上传 —— 否则挂载在启动时判断目录不存在，
+    #    首个头像上传成功后 url 却 404，要重启才好（时序坑）。
+    avatars_dir = Path(__file__).resolve().parents[2] / "uploads" / "avatars"
+    avatars_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/uploads", StaticFiles(directory=avatars_dir.parent), name="uploads")
     return app
 
 

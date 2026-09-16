@@ -52,7 +52,10 @@ httpx==0.28.1
 fastapi==0.141.1
 starlette==1.6.0
 uvicorn==0.53.0
-# python-multipart 留到 M9（头像上传 multipart/form-data 才需要）
+# python-multipart：multipart/form-data 解析（M9 头像上传），版本 2026-09-16 实测
+python-multipart==0.0.32
+# Pillow：头像四道闸门（真实解码 + 解压炸弹防护 + 强制重编码 512×512 WebP，D29）
+pillow==12.3.0
 
 # --- 测试 -------------------------------------------------------------------
 # backend/tests/ 只测纯逻辑，**不连数据库**。

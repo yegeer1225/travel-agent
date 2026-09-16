@@ -16,6 +16,10 @@ from app.api.ratelimit import SlidingWindowLimiter
 from app.api.security import create_token
 from app.schemas import Trip, TripSummary
 from app.store.memory import (
+    InMemoryCommentStore,
+    InMemoryFavoriteStore,
+    InMemoryGuideStore,
+    InMemoryLikeStore,
     InMemorySessionStore,
     InMemoryTripStore,
     InMemoryUserStore,
@@ -49,12 +53,27 @@ def user_store() -> InMemoryUserStore:
 
 
 @pytest.fixture
-def client(stores, user_store) -> TestClient:
+def social_stores() -> dict[str, object]:
+    """M10/M11 的四个内存替身，测试可直接操作/断言。"""
+    return {
+        "guides": InMemoryGuideStore(),
+        "comments": InMemoryCommentStore(),
+        "likes": InMemoryLikeStore(),
+        "favorites": InMemoryFavoriteStore(),
+    }
+
+
+@pytest.fixture
+def client(stores, user_store, social_stores) -> TestClient:
     """每个测试一个干净的应用实例（存储与限流计数都从零开始）。"""
     app = create_app(
         session_repo=stores[0],
         trip_repo=stores[1],
         user_repo=user_store,
+        guide_repo=social_stores["guides"],
+        comment_repo=social_stores["comments"],
+        like_repo=social_stores["likes"],
+        favorite_repo=social_stores["favorites"],
         limiter=SlidingWindowLimiter(),
     )
     return _apply_auth(TestClient(app))

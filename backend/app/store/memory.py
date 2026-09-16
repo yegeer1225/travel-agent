@@ -209,4 +209,217 @@ class InMemoryTripStore:
         return row["trip"]
 
 
-__all__ = ["InMemorySessionStore", "InMemoryTripStore"]
+__all__ = [
+    "InMemorySessionStore",
+    "InMemoryTripStore",
+    "InMemoryGuideStore",
+    "InMemoryCommentStore",
+    "InMemoryLikeStore",
+    "InMemoryFavoriteStore",
+]
+
+
+# ══════════════════════════════════════════════════════════════
+#  M10/M11 内存替身 —— 与 GuideRepo / CommentRepo / LikeRepo / FavoriteRepo 同签名
+# ══════════════════════════════════════════════════════════════
+
+
+class InMemoryGuideStore:
+    """进程内字典版 guides。**与 GuideRepo 方法逐一对应**，语义与 SQL 版一致。"""
+
+    def __init__(self) -> None:
+        self._rows: dict[str, dict[str, Any]] = {}
+
+    def create(
+        self,
+        user_id: int,
+        *,
+        title: str,
+        content_md: str,
+        destination: str | None = None,
+        cover: str | None = None,
+        poi_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        now = _now()
+        gid = uuid.uuid4().hex
+        rec = {
+            "id": gid, "user_id": user_id, "title": title, "content_md": content_md,
+            "destination": destination, "cover": cover, "poi_ids": list(poi_ids or []),
+            "visibility": "private", "published_at": None, "created_at": now, "updated_at": now,
+        }
+        self._rows[gid] = rec
+        return dict(rec)
+
+    @staticmethod
+    def _copy(r: dict[str, Any]) -> dict[str, Any]:
+        r = dict(r)
+        r["poi_ids"] = list(r["poi_ids"])
+        return r
+
+    def get(self, guide_id: str) -> dict[str, Any] | None:
+        r = self._rows.get(guide_id)
+        return self._copy(r) if r else None
+
+    def get_owned(self, user_id: int, guide_id: str) -> dict[str, Any] | None:
+        r = self._rows.get(guide_id)
+        if r is None or r["user_id"] != user_id:
+            return None
+        return self._copy(r)
+
+    def list_public(
+        self,
+        *,
+        city: str | None = None,
+        keywords: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        rows = [r for r in self._rows.values() if r["visibility"] == "public"]
+        if city:
+            rows = [r for r in rows if r["destination"] and city in r["destination"]]
+        if keywords:
+            rows = [r for r in rows if keywords in r["title"] or keywords in r["content_md"]]
+        rows.sort(key=lambda r: (r["published_at"] or r["created_at"]), reverse=True)
+        return [self._copy(r) for r in rows[offset : offset + limit]], len(rows)
+
+    def list_mine(self, user_id: int, *, limit: int = 20, offset: int = 0) -> tuple[list[dict[str, Any]], int]:
+        rows = [r for r in self._rows.values() if r["user_id"] == user_id]
+        rows.sort(key=lambda r: r["created_at"], reverse=True)
+        return [self._copy(r) for r in rows[offset : offset + limit]], len(rows)
+
+    _ALLOWED = {"title", "content_md", "destination", "cover", "poi_ids"}
+
+    def update(self, user_id: int, guide_id: str, fields: dict[str, Any]) -> dict[str, Any] | None:
+        r = self._rows.get(guide_id)
+        if r is None or r["user_id"] != user_id:
+            return None
+        for key, value in fields.items():
+            if key in self._ALLOWED:
+                r[key] = list(value) if key == "poi_ids" else value
+        r["updated_at"] = _now()
+        return self._copy(r)
+
+    def set_visibility(self, user_id: int, guide_id: str, visibility: str) -> dict[str, Any] | None:
+        r = self._rows.get(guide_id)
+        if r is None or r["user_id"] != user_id:
+            return None
+        r["visibility"] = visibility
+        r["published_at"] = _now() if visibility == "public" else None
+        r["updated_at"] = _now()
+        return self._copy(r)
+
+    def delete(self, user_id: int, guide_id: str) -> bool:
+        r = self._rows.get(guide_id)
+        if r is None or r["user_id"] != user_id:
+            return False
+        del self._rows[guide_id]
+        return True
+
+
+class InMemoryCommentStore:
+    """进程内字典版 comments。作者名从注入的 {user_id: name} 反查。"""
+
+    def __init__(self, users: dict[int, str] | None = None) -> None:
+        self._rows: dict[str, dict[str, Any]] = {}
+        self._user_names: dict[int, str] = users or {}
+
+    def register_user_name(self, user_id: int, name: str) -> None:
+        self._user_names[user_id] = name
+
+    def _author(self, user_id: int) -> str:
+        return self._user_names.get(user_id, f"用户{user_id}")
+
+    def create(self, user_id: int, target_type: str, target_id: str, content: str) -> dict[str, Any]:
+        cid = uuid.uuid4().hex
+        rec = {
+            "id": cid, "user_id": user_id, "target_type": target_type,
+            "target_id": target_id, "content": content, "created_at": _now(),
+        }
+        self._rows[cid] = rec
+        return {**rec, "author_name": self._author(user_id), "author_type": "user"}
+
+    def list(
+        self, target_type: str, target_id: str, *, limit: int = 20, offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        rows = [r for r in self._rows.values() if r["target_type"] == target_type and r["target_id"] == target_id]
+        rows.sort(key=lambda r: r["created_at"], reverse=True)
+        return [
+            {**r, "author_name": self._author(r["user_id"]), "author_type": "user"}
+            for r in rows[offset : offset + limit]
+        ], len(rows)
+
+    def get(self, comment_id: str) -> dict[str, Any] | None:
+        r = self._rows.get(comment_id)
+        if r is None:
+            return None
+        return {**r, "author_name": self._author(r["user_id"]), "author_type": "user"}
+
+    def delete(self, comment_id: str) -> bool:
+        return self._rows.pop(comment_id, None) is not None
+
+    def counts(self, target_type: str, target_ids: list[str]) -> dict[str, int]:
+        return {
+            tid: sum(
+                1 for r in self._rows.values()
+                if r["target_type"] == target_type and r["target_id"] == tid
+            )
+            for tid in target_ids
+        }
+
+
+class InMemoryLikeStore:
+    """进程内字典版 likes。key = (user_id, target_type, target_id)。"""
+
+    def __init__(self) -> None:
+        self._rows: set[tuple[int, str, str]] = set()
+
+    def toggle(self, user_id: int, target_type: str, target_id: str) -> tuple[bool, int]:
+        key = (user_id, target_type, target_id)
+        if key in self._rows:
+            self._rows.discard(key)
+            liked = False
+        else:
+            self._rows.add(key)
+            liked = True
+        return liked, self._count(target_type, target_id)
+
+    def state(self, user_id: int, target_type: str, target_id: str) -> tuple[bool, int]:
+        return (user_id, target_type, target_id) in self._rows, self._count(target_type, target_id)
+
+    def _count(self, target_type: str, target_id: str) -> int:
+        return sum(1 for _, t, i in self._rows if t == target_type and i == target_id)
+
+    def counts(self, target_type: str, target_ids: list[str]) -> dict[str, int]:
+        return {tid: self._count(target_type, tid) for tid in target_ids}
+
+
+class InMemoryFavoriteStore:
+    """进程内字典版 favorites。key = (user_id, target_type, target_id)。"""
+
+    def __init__(self) -> None:
+        self._rows: dict[tuple[int, str, str], dict[str, Any]] = {}
+
+    def add(
+        self, user_id: int, target_type: str, target_id: str, name: str, cover: str | None = None,
+    ) -> dict[str, Any]:
+        key = (user_id, target_type, target_id)
+        if key in self._rows:
+            return dict(self._rows[key])
+        rec = {
+            "user_id": user_id, "target_type": target_type, "target_id": target_id,
+            "name": name, "cover": cover, "created_at": _now(),
+        }
+        self._rows[key] = rec
+        return dict(rec)
+
+    def list(
+        self, user_id: int, *, target_type: str | None = None, limit: int = 20, offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        rows = [r for r in self._rows.values() if r["user_id"] == user_id]
+        if target_type:
+            rows = [r for r in rows if r["target_type"] == target_type]
+        rows.sort(key=lambda r: r["created_at"], reverse=True)
+        return [dict(r) for r in rows[offset : offset + limit]], len(rows)
+
+    def remove(self, user_id: int, target_type: str, target_id: str) -> bool:
+        return self._rows.pop((user_id, target_type, target_id), None) is not None

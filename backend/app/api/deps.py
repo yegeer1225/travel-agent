@@ -69,11 +69,31 @@ def get_nodes(request: Request) -> Any:
     return nodes
 
 
+def get_guide_repo(request: Request):
+    return request.app.state.guide_repo
+
+
+def get_comment_repo(request: Request):
+    return request.app.state.comment_repo
+
+
+def get_like_repo(request: Request):
+    return request.app.state.like_repo
+
+
+def get_favorite_repo(request: Request):
+    return request.app.state.favorite_repo
+
+
 __all__ = [
     "get_current_user_id",
     "get_nodes",
     "get_session_repo",
     "get_trip_repo",
     "get_user_repo",
+    "get_guide_repo",
+    "get_comment_repo",
+    "get_like_repo",
+    "get_favorite_repo",
     "get_limiter",
 ]

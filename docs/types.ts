@@ -444,6 +444,8 @@ export interface LikeState {
 export interface FavoriteCreateRequest {
   target_type: TargetType
   target_id: string
+  name: string | null
+  cover: string | null
 }
 
 export interface FavoriteItem {

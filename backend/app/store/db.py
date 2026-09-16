@@ -91,6 +91,58 @@ _DDL_TABLES: tuple[str, ...] = (
         KEY idx_trips_session (session_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     """,
+    """
+    CREATE TABLE IF NOT EXISTS guides (
+        id           CHAR(36)      NOT NULL,
+        user_id      INT           NOT NULL,
+        title        VARCHAR(100)  NOT NULL,
+        content_md   MEDIUMTEXT    NOT NULL,
+        destination  VARCHAR(100)  NULL,
+        cover        VARCHAR(500)  NULL,
+        poi_ids      JSON          NULL,
+        visibility   VARCHAR(16)   NOT NULL DEFAULT 'private',
+        published_at DATETIME(6)   NULL,
+        created_at   DATETIME(6)   NOT NULL,
+        updated_at   DATETIME(6)   NOT NULL,
+        PRIMARY KEY (id),
+        KEY idx_guides_user (user_id, created_at DESC),
+        KEY idx_guides_pub (visibility, published_at DESC)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS comments (
+        id          CHAR(36)    NOT NULL,
+        user_id     INT         NOT NULL,
+        target_type VARCHAR(16) NOT NULL,
+        target_id   CHAR(36)    NOT NULL,
+        content     VARCHAR(500) NOT NULL,
+        created_at  DATETIME(6) NOT NULL,
+        PRIMARY KEY (id),
+        KEY idx_comments_target (target_type, target_id, created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS likes (
+        user_id     INT         NOT NULL,
+        target_type VARCHAR(16) NOT NULL,
+        target_id   CHAR(36)    NOT NULL,
+        created_at  DATETIME(6) NOT NULL,
+        PRIMARY KEY (user_id, target_type, target_id),
+        KEY idx_likes_target (target_type, target_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS favorites (
+        user_id     INT          NOT NULL,
+        target_type VARCHAR(16)  NOT NULL,
+        target_id   VARCHAR(64)  NOT NULL,
+        name        VARCHAR(200) NOT NULL,
+        cover       VARCHAR(500) NULL,
+        created_at  DATETIME(6)  NOT NULL,
+        PRIMARY KEY (user_id, target_type, target_id),
+        KEY idx_favorites_user (user_id, created_at DESC)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+    """,
 )
 
 

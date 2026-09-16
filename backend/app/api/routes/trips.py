@@ -32,6 +32,7 @@ from app.graph.recompute import OpApplyError, apply_ops, recompute_trip
 from app.graph.soft import run_soft_checks
 from app.graph.validate import flatten_checks
 from app.schemas import (
+    AmapImportResponse,
     CheckLevel,
     CheckStatus,
     DoneEvent,
@@ -236,3 +237,51 @@ async def paste_trip(
         media_type="text/event-stream",
         headers=SSE_HEADERS,
     )
+
+
+@router.post("/trips/{trip_id}/amap-import", response_model=AmapImportResponse)
+def amap_import(
+    trip_id: str,
+    user_id: int = Depends(get_current_user_id),
+    repo: TripRepo = Depends(get_trip_repo),
+) -> AmapImportResponse:
+    """高德 APP 唤端链接（M7 🔵）：把行程站点拼成 uri.amap.com 的导航链接。
+
+    这是**唤端链接不是数据写入** —— 高德没有"导入行程"的开放 API，
+    能给的就是一条多途经点导航 URL，用户点开在 App 里看路线。
+    途经点上限 9 个是链接长度与高德解析的稳妥边界，超出的写进 note 说明。
+    """
+    import urllib.parse
+
+    trip = repo.get(user_id, trip_id)
+    if trip is None:
+        raise AppError("not_found", "行程不存在", 404)
+
+    pts: list[tuple[float, float, str]] = []
+    for day in trip.days:
+        for stop in sorted(day.stops, key=lambda s: s.seq):
+            pts.append((stop.lng, stop.lat, stop.name))
+    if not pts:
+        raise AppError("invalid_state", "行程没有任何站点，无法生成高德链接", 400)
+
+    def _pt(p: tuple[float, float, str]) -> str:
+        return f"{p[0]:.6f},{p[1]:.6f},{urllib.parse.quote(p[2])}"
+
+    via = pts[1:-1]
+    note: str | None = None
+    if len(via) > 9:
+        note = f"途经点共 {len(via)} 个，链接只带前 9 个，其余请在高德内手动补齐"
+        via = via[:9]
+
+    params = {
+        "from": _pt(pts[0]),
+        "to": _pt(pts[-1]),
+        "mode": "car",
+        "src": "trip-agent",
+        "coordinate": "gaode",
+        "callnative": "0",
+    }
+    if via:
+        params["via"] = ";".join(_pt(p) for p in via)
+    url = "https://uri.amap.com/navigation?" + urllib.parse.urlencode(params)
+    return AmapImportResponse(url=url, note=note)

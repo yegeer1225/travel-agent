@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1440">
+<title>首页风格样张 v3 · 装饰收敛 · 旅游规划平台</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  /* ═══ 设计 token（与前端交接.md 第四节 @theme 完全一致）═══ */
+  :root {
+    --color-ink: #1A1A1A;
+    --color-muted: #6B7280;
+    --color-pop-red: #FF6B6B;
+    --color-pop-cyan: #4ECDC4;
+    --color-pop-yellow: #FFD93D;
+    --color-pop-green: #6BCB77;
+    --color-pop-blue: #4D96FF;
+    --color-status-pass: #16A34A;
+    --color-status-fail: #DC2626;
+    --color-status-unknown: #D97706;
+    --font-display: 'Space Grotesk', 'Noto Sans SC', system-ui, sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { background: #fff; }
+  body {
+    font-family: 'Noto Sans SC', system-ui, sans-serif;
+    color: var(--color-ink);
+    background: #fff;
+    -webkit-font-smoothing: antialiased;
+  }
+  .display { font-family: var(--font-display); font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+  .page { width: 1440px; margin: 0 auto; position: relative; overflow: hidden; }
+
+  .card { background: #fff; border: 1px solid var(--color-ink); border-radius: 4px; }
+  .raised-red   { box-shadow: 8px 8px 0 0 var(--color-pop-red); }
+  .raised-cyan  { box-shadow: 8px 8px 0 0 var(--color-pop-cyan); }
+  .raised-blue  { box-shadow: 8px 8px 0 0 var(--color-pop-blue); }
+  .raised-yellow{ box-shadow: 8px 8px 0 0 var(--color-pop-yellow); }
+
+  /* ═══ 导航 ═══ */
+  .nav {
+    display: flex; align-items: center; gap: 32px;
+    padding: 20px 56px;
+    border-bottom: 1px solid var(--color-ink);
+    background: #fff;
+    position: relative; z-index: 10;
+  }
+  .logo { display: flex; align-items: center; gap: 10px; }
+  .logo-mark {
+    width: 40px; height: 40px; background: var(--color-ink); color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-display); font-weight: 700; font-size: 18px;
+    border-radius: 4px; transform: rotate(-2deg);
+  }
+  .logo-name { font-family: var(--font-display); font-weight: 700; font-size: 17px; letter-spacing: 0.04em; }
+  .nav-links { display: flex; gap: 6px; margin-left: auto; }
+  .nav-item {
+    font-size: 14px; color: var(--color-ink); text-decoration: none;
+    padding: 8px 14px; border-radius: 4px; white-space: nowrap;
+  }
+  .nav-item.active { background: var(--color-pop-yellow); font-weight: 700; }
+
+  /* ═══ 装饰元素库（只放留白处，不贴内容）═══ */
+  .deco { position: absolute; pointer-events: none; }
+  .deco-circle { border-radius: 50%; }
+  .deco-tri { clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+  .deco-ring { border-radius: 50%; border: 3px solid var(--color-ink); }
+  .deco-dots { background-image: radial-gradient(var(--color-ink) 2.5px, transparent 2.5px); background-size: 16px 16px; }
+  .deco-half { border-radius: 0 50% 50% 0; }
+
+  /* ═══ Hero ═══ */
+  .hero { position: relative; padding: 72px 56px 88px; }
+  .hero-grid { display: grid; grid-template-columns: 620px 1fr; gap: 40px; align-items: center; position: relative; z-index: 2; }
+  .hero h1 { font-size: 62px; line-height: 1.08; font-family: var(--font-display); font-weight: 700; letter-spacing: 0.02em; }
+  .hero-sub { margin-top: 20px; font-size: 17px; color: var(--color-muted); line-height: 1.8; max-width: 540px; }
+  .hero-cta { margin-top: 36px; display: flex; align-items: center; gap: 18px; }
+  .btn-black {
+    display: inline-block; background: var(--color-ink); color: #fff;
+    font-family: var(--font-display); font-weight: 700; font-size: 16px; letter-spacing: 0.05em;
+    text-transform: uppercase; text-decoration: none;
+    padding: 16px 30px; border-radius: 4px; border: 1px solid var(--color-ink);
+    transform: rotate(-1deg);
+  }
+  .btn-black:hover { background: var(--color-pop-blue); }
+  .hero-note { font-size: 13px; color: var(--color-muted); }
+
+  /* 右侧拼贴 */
+  .hero-visual { position: relative; height: 480px; }
+  .photo-card {
+    position: absolute; width: 340px; height: 220px;
+    border: 1px solid var(--color-ink); border-radius: 4px; overflow: hidden;
+  }
+  .photo-card .ph { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+  .ph-name { font-family: var(--font-display); font-weight: 700; font-size: 30px; letter-spacing: 0.06em; color: var(--color-ink); text-transform: uppercase; }
+  .ph-city { position: absolute; bottom: 12px; left: 12px; background: var(--color-ink); color: #fff; font-size: 12px; padding: 4px 8px; border-radius: 2px; }
+  .hero-badge {
+    position: absolute; display: flex; align-items: center; justify-content: center;
+    border-radius: 50%; border: 1px solid var(--color-ink);
+    font-family: var(--font-display); font-weight: 700; font-size: 13px;
+  }
+  .badge-star { width: 84px; height: 84px; background: var(--color-pop-yellow); transform: rotate(12deg); }
+
+  /* ═══ 猜你喜欢 ═══ */
+  .section { padding: 0 56px 72px; position: relative; }
+  .sec-head { display: flex; align-items: baseline; gap: 16px; margin-bottom: 32px; position: relative; z-index: 2; }
+  .sec-title { font-size: 34px; }
+  .sec-sub { font-size: 14px; color: var(--color-muted); }
+  .rec-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; position: relative; z-index: 2; }
+  .rec-card { position: relative; background: #fff; border: 1px solid var(--color-ink); border-radius: 4px; overflow: hidden; }
+  .rec-corner { position: absolute; top: 0; left: 0; width: 0; height: 0; border-top: 26px solid var(--color-pop-yellow); border-right: 26px solid transparent; }
+  .rec-cover { height: 150px; display: flex; align-items: center; justify-content: center; position: relative; }
+  .rec-name { font-family: var(--font-display); font-weight: 700; font-size: 26px; letter-spacing: 0.04em; text-transform: uppercase; }
+  .rec-body { padding: 16px 16px 18px; }
+  .rec-line { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: var(--color-muted); }
+  .rec-line b { color: var(--color-ink); font-weight: 700; }
+  .rec-tag { display: inline-block; margin-top: 12px; font-size: 12px; padding: 4px 10px; border: 1px solid var(--color-ink); border-radius: 2px; }
+
+  /* ═══ 页脚 ═══ */
+  .footer { border-top: 1px solid var(--color-ink); padding: 28px 56px; display: flex; justify-content: space-between; font-size: 13px; color: var(--color-muted); position: relative; z-index: 2; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ════ 装饰层（收敛版：数量克制，全部落在留白处，不贴文字/按钮/卡片） ════ -->
+
+  <!-- Hero 顶部与文字区边角 -->
+  <div class="deco deco-circle" style="width:14px;height:14px;background:var(--color-pop-red);top:104px;left:520px;"></div>
+  <div class="deco deco-ring"   style="width:48px;height:48px;top:120px;left:36px;"></div>
+  <div class="deco deco-tri"    style="width:38px;height:34px;background:var(--color-pop-blue);top:236px;left:600px;transform:rotate(14deg);"></div>
+  <div class="deco deco-circle" style="width:16px;height:16px;background:var(--color-pop-green);top:486px;left:618px;"></div>
+
+  <!-- Hero 右视觉区边角 -->
+  <div class="deco deco-circle" style="width:140px;height:140px;background:var(--color-pop-red);opacity:.85;top:16px;right:-44px;"></div>
+  <div class="deco deco-ring"   style="width:34px;height:34px;top:128px;right:252px;"></div>
+  <div class="deco deco-circle" style="width:12px;height:12px;background:var(--color-pop-yellow);top:252px;left:742px;"></div>
+  <div class="deco deco-half"   style="width:44px;height:88px;background:var(--color-pop-green);top:316px;right:8px;"></div>
+  <div class="deco deco-tri"    style="width:56px;height:48px;background:var(--color-pop-cyan);bottom:14px;right:168px;transform:rotate(200deg);"></div>
+  <div class="deco deco-dots"   style="width:72px;height:40px;bottom:10px;left:26px;opacity:.75;"></div>
+
+  <!-- 猜你喜欢区边角 -->
+  <div class="deco deco-tri"    style="width:32px;height:28px;background:var(--color-pop-green);top:8px;right:96px;transform:rotate(20deg);"></div>
+  <div class="deco deco-circle" style="width:12px;height:12px;background:var(--color-pop-red);top:72px;left:852px;"></div>
+  <div class="deco deco-ring"   style="width:26px;height:26px;bottom:26px;left:72px;"></div>
+  <div class="deco deco-dots"   style="width:80px;height:44px;bottom:22px;right:140px;opacity:.6;"></div>
+
+  <!-- ════ 导航栏 ════ -->
+  <header class="nav">
+    <div class="logo">
+      <div class="logo-mark">TR</div>
+      <div class="logo-name">旅游规划平台</div>
+    </div>
+    <nav class="nav-links">
+      <a class="nav-item active" href="#">首页</a>
+      <a class="nav-item" href="#">旅游景点</a>
+      <a class="nav-item" href="#">AI路线规划助手</a>
+      <a class="nav-item" href="#">路线总览</a>
+      <a class="nav-item" href="#">旅游攻略</a>
+      <a class="nav-item" href="#">个人中心</a>
+    </nav>
+  </header>
+
+  <!-- ════ Hero ════ -->
+  <section class="hero">
+    <div class="hero-grid">
+      <div>
+        <h1>
+          AI 把行程<br>
+          安排得明明白白
+        </h1>
+        <p class="hero-sub">说一句「成都 3 天，带爸妈」，自动排好每天去哪、几点到、路上多久、天气合不合适——还能拖拽改顺序，实时重算。</p>
+        <div class="hero-cta">
+          <a class="btn-black" href="#">开始规划</a>
+          <span class="hero-note">或粘贴一份现成攻略，秒出路线总览</span>
+        </div>
+      </div>
+
+      <div class="hero-visual">
+        <!-- 拼贴卡片（色块占位 = 风格一部分；联调后换高德真图） -->
+        <div class="photo-card raised-red" style="top:10px;left:40px;background:var(--color-pop-yellow);">
+          <div class="ph"><span class="ph-name">宽窄巷子</span></div>
+          <div class="ph-city">成都 · 青羊区</div>
+        </div>
+        <div class="photo-card" style="top:230px;left:280px;background:var(--color-pop-cyan);">
+          <div class="ph"><span class="ph-name">武侯祠</span></div>
+          <div class="ph-city">成都 · 武侯区</div>
+        </div>
+        <div class="photo-card" style="top:60px;left:560px;background:var(--color-pop-blue);">
+          <div class="ph"><span class="ph-name">都江堰</span></div>
+          <div class="ph-city">成都 · 都江堰市</div>
+        </div>
+        <div class="hero-badge badge-star" style="top:400px;left:10px;">3 天<br>9 站</div>
+        <div class="hero-badge" style="width:56px;height:56px;background:var(--color-pop-red);top:420px;left:610px;font-size:18px;color:#fff;">✓</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════ 猜你喜欢 ════ -->
+  <section class="section">
+    <div class="sec-head">
+      <h2 class="sec-title display">猜你喜欢</h2>
+      <span class="sec-sub">高德真实景点数据</span>
+    </div>
+
+    <div class="rec-grid">
+      <div class="rec-card raised-yellow">
+        <div class="rec-corner"></div>
+        <div class="rec-cover" style="background:var(--color-pop-yellow);"><span class="rec-name">宽窄巷子</span></div>
+        <div class="rec-body">
+          <div class="rec-line"><span>青羊区</span><b>评分 4.8</b></div>
+          <span class="rec-tag">步行街</span>
+        </div>
+      </div>
+      <div class="rec-card">
+        <div class="rec-cover" style="background:var(--color-pop-cyan);"><span class="rec-name">武侯祠</span></div>
+        <div class="rec-body">
+          <div class="rec-line"><span>武侯区</span><b>评分 4.8</b></div>
+          <span class="rec-tag">古迹</span>
+        </div>
+      </div>
+      <div class="rec-card raised-cyan">
+        <div class="rec-cover" style="background:var(--color-pop-blue);"><span class="rec-name">熊猫基地</span></div>
+        <div class="rec-body">
+          <div class="rec-line"><span>成华区</span><b>评分 4.8</b></div>
+          <span class="rec-tag">亲子</span>
+        </div>
+      </div>
+      <div class="rec-card">
+        <div class="rec-cover" style="background:var(--color-pop-green);"><span class="rec-name">青城山</span></div>
+        <div class="rec-body">
+          <div class="rec-line"><span>都江堰市</span><b>评分 4.7</b></div>
+          <span class="rec-tag">登山</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <span>TR 旅游规划平台</span>
+    <span>1440px 桌面端 · 高德数据经后端代理</span>
+  </footer>
+</div>
+</body>
+</html>
