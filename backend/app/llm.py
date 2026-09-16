@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from langchain_openai import ChatOpenAI
 
-from app.config import settings
+from app.config import _CREDENTIAL_BY_PROVIDER, MODEL_REGISTRY, model_supports_thinking, settings
 
 DEFAULT_TIMEOUT = 120.0
 """单次调用超时（秒）。行程生成实测可能到 30s~2min，给足；但**不能不给** ——
@@ -34,34 +34,54 @@ DEFAULT_TIMEOUT = 120.0
 
 
 def _build(model: str, thinking: str, *, temperature: float | None) -> ChatOpenAI:
+    """按 `MODEL_REGISTRY` 的 provider 路由凭据（D56）；思考开关按节点类型传入。
+
+    🔴 `supports_thinking=False` 的模型（qwen-plus）**连 thinking 参数都不发** ——
+    不是发 disabled，是不发（`model_supports_thinking` 里说了为什么别赌兼容层）。
+    所以 plan 节点即使 `.env` 配了 enabled，选了 qwen 会话也会被这里剥掉。
+    """
+    info = MODEL_REGISTRY.get(model) or {}
+    provider = str(info.get("provider", "deepseek"))
+    key_field, base_url_field = _CREDENTIAL_BY_PROVIDER.get(
+        provider, ("llm_api_key", "llm_base_url")
+    )
+    api_key = getattr(settings, key_field)
+    base_url = getattr(settings, base_url_field)
+    if not api_key:
+        # 正常走不到：建会话时 model_available 已 fail-fast。这里是最后防线。
+        raise ValueError(f"模型 {model} 的 provider={provider} 凭据未配置（{key_field}）")
+
     kwargs: dict[str, object] = {
         "model": model,
-        "api_key": settings.llm_api_key,
-        "base_url": settings.llm_base_url,
+        "api_key": api_key,
+        "base_url": base_url,
         "max_retries": 3,  # D26：只重试 429/5xx/超时（SDK 内部就是这么判的）
         "timeout": DEFAULT_TIMEOUT,
-        "extra_body": {"thinking": {"type": thinking}},
     }
+    if thinking and model_supports_thinking(model):
+        kwargs["extra_body"] = {"thinking": {"type": thinking}}
     if temperature is not None:
         kwargs["temperature"] = temperature
     return ChatOpenAI(**kwargs)  # type: ignore[arg-type]
 
 
-def build_tool_llm() -> ChatOpenAI:
+def build_tool_llm(model: str | None = None) -> ChatOpenAI:
     """给 `agent_step` 用：**关思考**，temperature=0。
 
     - 关思考：硬约束（见模块 docstring）
     - `temperature=0`：工具选择是**决策**不是创作，要的就是稳定复现
       （思考关掉了，temperature 才真正生效 —— 这也是关思考的附带好处）
+    - `model`：会话级覆盖（A45/D55），None = `.env` 默认。两槽位收同一个
+      会话模型，思考开关仍按节点类型走
     """
     return _build(
-        settings.llm_model_tool,
+        model or settings.llm_model_tool,
         settings.llm_thinking_tool,
         temperature=0,
     )
 
 
-def build_plan_llm() -> ChatOpenAI:
+def build_plan_llm(model: str | None = None) -> ChatOpenAI:
     """给 `generate_plan` 用：**开思考**，不设 temperature。
 
     `temperature=None` 是**故意的**，不是漏写：
@@ -69,13 +89,13 @@ def build_plan_llm() -> ChatOpenAI:
     留空 = 让代码诚实反映这个事实。
     """
     return _build(
-        settings.llm_model_plan,
+        model or settings.llm_model_plan,
         settings.llm_thinking_plan,
         temperature=None,
     )
 
 
-def build_extract_llm() -> ChatOpenAI:
+def build_extract_llm(model: str | None = None) -> ChatOpenAI:
     """给 `parse_intent` 用：**不挂 tools，但依然关思考**，temperature=0。
 
     这是一个**第三种组合**，所以 D8 那张"带不带 tools"的两行表不够用了。
@@ -99,13 +119,13 @@ def build_extract_llm() -> ChatOpenAI:
     并且在代码里校验"日期不能早于今天" —— 用外部约束补上推理的缺口。
     """
     return _build(
-        settings.llm_model_tool,
+        model or settings.llm_model_tool,
         "disabled",
         temperature=0,
     )
 
 
-def build_soft_llm() -> ChatOpenAI:
+def build_soft_llm(model: str | None = None) -> ChatOpenAI:
     """给 `soft_check` 用：**不挂 tools + 关思考 + temperature=0**。
 
     这是**第四种组合**，但和 `build_extract_llm` 同形。为什么还是单独开一个工厂：
@@ -125,13 +145,13 @@ def build_soft_llm() -> ChatOpenAI:
     一次行程 = 工具循环 N 次 + 规划 1 次 + **软判据 1 次**，这一份是固定的。
     """
     return _build(
-        settings.llm_model_tool,
+        model or settings.llm_model_tool,
         "disabled",
         temperature=0,
     )
 
 
-def build_sub_llm() -> ChatOpenAI:
+def build_sub_llm(model: str | None = None) -> ChatOpenAI:
     """给搜索子 agent 的规划轮用（M4）：**不挂 tools + 关思考 + temperature=0**。
 
     与 `build_extract_llm` / `build_soft_llm` 同形，但仍单独开一个工厂，
@@ -147,7 +167,7 @@ def build_sub_llm() -> ChatOpenAI:
     上摊开后就是这个数），不是回归。
     """
     return _build(
-        settings.llm_model_tool,
+        model or settings.llm_model_tool,
         "disabled",
         temperature=0,
     )

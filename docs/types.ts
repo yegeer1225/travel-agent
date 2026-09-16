@@ -185,6 +185,7 @@ export interface ChatMessage {
 export interface Session {
   session_id: string
   title: string
+  model: string | null
   created_at: string
   updated_at: string
 }
@@ -327,6 +328,7 @@ export interface ErrorBody {
 
 export interface SessionCreateRequest {
   title: string | null
+  model: string | null
 }
 
 export interface SessionDetail {

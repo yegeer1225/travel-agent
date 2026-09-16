@@ -198,7 +198,7 @@ async def chat(
 
     resume = "last-event-id" in request.headers  # D27：带 Last-Event-ID = 断线恢复
 
-    handle = await request.app.state.chat_factory(session_id)
+    handle = await request.app.state.chat_factory(session_id, model=session.model)
     if not resume:  # 恢复时不重发用户消息（checkpoint 里已经有了）
         session_repo.append_message(user_id, session_id, role="user", content=message)
     has_checkpoint = await handle.has_checkpoint()

@@ -95,10 +95,14 @@ def build_runtime(
     *,
     provider: AmapProvider | None = None,
     today: Any = None,
+    model: str | None = None,
 ) -> Nodes:
     """组装一次运行需要的全部依赖。
 
     ⚠️ **这是唯一一处把 provider / 工具 / 三个 LLM 凑到一起的地方。**
+
+    `model` = 会话级模型覆盖（A45/D55）：两槽位都换成它，思考开关仍按节点类型；
+    None = `.env` 默认。粘贴 / recheck 不传它（不挂会话，永远默认）。
     节点本身只依赖 `Nodes` 这个形状，所以测试里可以整个换掉
     （塞 mock provider、塞假 LLM），不需要动图结构。
     """
@@ -133,7 +137,7 @@ def build_runtime(
     # （一步到位 token 更少），task 成摆设，上下文隔离名存实亡。
     # 子 agent 内部复用同一个 search_poi 实例：在 tool_step 的池子作用域内
     # 执行，搜到的 POI 自动进主候选池，封闭世界不破（见 subagent.py docstring）。
-    subgraph = build_search_subagent(llm=build_sub_llm(), search_tool=by_name["search_poi"])
+    subgraph = build_search_subagent(llm=build_sub_llm(model), search_tool=by_name["search_poi"])
     main_tools = [
         build_task_tool(subgraph=subgraph, default_city=default_city),
         by_name["get_weather"],
@@ -143,10 +147,10 @@ def build_runtime(
     return Nodes(
         provider=active_provider,
         tools=main_tools,
-        llm_tool=build_tool_llm(),
-        llm_plan=build_plan_llm(),
-        llm_extract=build_extract_llm(),
-        llm_soft=build_soft_llm(),
+        llm_tool=build_tool_llm(model),
+        llm_plan=build_plan_llm(model),
+        llm_extract=build_extract_llm(model),
+        llm_soft=build_soft_llm(model),
         today=today,
     )
 

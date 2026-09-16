@@ -30,18 +30,25 @@ class InMemorySessionStore:
     def __init__(self) -> None:
         self._rows: dict[str, dict] = {}
 
-    def create(self, user_id: int, title: str | None = None, *, session_id: str | None = None) -> Session:
+    def create(
+        self,
+        user_id: int,
+        title: str | None = None,
+        *,
+        session_id: str | None = None,
+        model: str | None = None,
+    ) -> Session:
         now = _now()
         sid = session_id or uuid.uuid4().hex
-        self._rows[sid] = {"user_id": user_id, "title": title or DEFAULT_SESSION_TITLE, "created_at": now, "updated_at": now}
-        return Session(session_id=sid, title=title or DEFAULT_SESSION_TITLE, created_at=now, updated_at=now)
+        self._rows[sid] = {"user_id": user_id, "title": title or DEFAULT_SESSION_TITLE, "model": model, "created_at": now, "updated_at": now}
+        return Session(session_id=sid, title=title or DEFAULT_SESSION_TITLE, model=model, created_at=now, updated_at=now)
 
     def list(self, user_id: int, *, limit: int = 20, offset: int = 0) -> tuple[list[Session], int]:
         pairs = [(sid, r) for sid, r in self._rows.items() if r["user_id"] == user_id]
         pairs.sort(key=lambda p: p[1]["updated_at"], reverse=True)
         items = [
             Session(
-                session_id=sid, title=r["title"],
+                session_id=sid, title=r["title"], model=r.get("model"),
                 created_at=r["created_at"], updated_at=r["updated_at"],
             )
             for sid, r in pairs[offset : offset + limit]
@@ -53,7 +60,7 @@ class InMemorySessionStore:
         if row is None or row["user_id"] != user_id:
             return None
         return Session(
-            session_id=session_id, title=row["title"],
+            session_id=session_id, title=row["title"], model=row.get("model"),
             created_at=row["created_at"], updated_at=row["updated_at"],
         )
 

@@ -161,7 +161,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJ1aWQiOjF9.xxx
 | 方法 | 路径 | 阶段 | 说明 |
 |---|---|---|---|
 | GET | `/sessions` | M5 🟢 | 我的会话列表（分页）→ `Page<Session>` |
-| POST | `/sessions` | M5 🟢 | 新建空会话。body `{title?}` → `Session` |
+| POST | `/sessions` | M5 🟢 | 新建空会话。body `{title?, model?}` → `Session`。**`model` 可省**（= 跟随后端 `.env` 默认）；选定后会话内固定（A45）。省/传 null 走默认；传了但不在可选面或凭据未配 → `400 invalid_param` |
 | GET | `/sessions/{id}` | M5 🟢 | 会话 + 全部历史消息 → `SessionDetail` |
 | DELETE | `/sessions/{id}` | M5 🟢 | 删会话。**不删行程**（行程是独立资产，个人中心还要列） |
 | POST | `/sessions/{id}/chat` | **M6** 🟢 | **SSE**。body `ChatRequest` → 事件流 |

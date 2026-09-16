@@ -81,8 +81,10 @@ def make_client(handle: FakeHandle, stores: tuple) -> TestClient:
     return TestClient(app)
 
 
-def fake_factory(handle: FakeHandle):
-    async def factory(session_id: str) -> FakeHandle:
+def fake_factory(handle: FakeHandle, *, seen_models: list | None = None):
+    async def factory(session_id: str, *, model: str | None = None) -> FakeHandle:
+        if seen_models is not None:
+            seen_models.append(model)  # 供"会话模型透传"断言用
         return handle
 
     return factory

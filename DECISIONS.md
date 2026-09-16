@@ -1303,6 +1303,42 @@ saver 是进程级单例 —— **测试里不能用默认 factory**（会真连
 
 ---
 
+### D55 · 会话级模型切换（B 档）　`A45`　2026-09-16
+
+> **决定**：`POST /sessions` 加可选 `model` 字段（`str | None`）；省略 = 跟随
+> `.env` 默认（现状行为不变）；选定后**会话内固定**。两槽位（tool/plan）都换成
+> 该模型，**思考开关仍按节点类型**（`supports_thinking=False` 的模型强制
+> disabled，防止给不支持思考的模型发 thinking 参数）。校验在**建会话时**
+> fail-fast：不在 `MODEL_REGISTRY` 或该 provider 凭据未配 → 400 `invalid_param`。
+
+| 替代方案 | 否决理由 |
+|---|---|
+| 全局 `.env`（现状） | 不满足需求本体——用户要的是**对话窗口里选**，运维式重启换模型不是产品能力 |
+| 每轮切换（`ChatRequest` 加 model，A 档） | 契约面更大；且同一会话两轮用不同模型 = **checkpoint 历史混两个模型的输出**，DeepSeek 对历史消息格式敏感（坑 1 那类 400 风险），还要额外验证混来源历史不炸——收益撑不起风险 |
+
+**代价**：① 契约变更一次（SessionCreateRequest + Session 响应 → types.ts 重生成，豆包加选择器 UI）；② `sessions` 表加 `model` 列（幂等迁移）；③ `chat_factory` 从"单图复用"变"按模型缓存图"（多占一份编译图的内存，图对象本身轻，checkpointer 共享）。**粘贴 / recheck 不在范围**（不挂会话，永远默认模型）——模型切换是**对话体验**不是全局开关，边界收窄才值得做。
+**重审触发**：前端要做"对话中途换模型" → 得走每轮级或扩 `PATCH /sessions`，届时必须先解决混模型历史问题（或换会话）；MODEL_REGISTRY 加新 provider 时凭据路由要跟着扩（见 D56）。
+
+---
+
+### D56 · qwen-plus 的凭据现实：名字注册 ≠ 能用　`A45` 附带　2026-09-16
+
+> **决定**：`_build` 按 `MODEL_REGISTRY` 的 `provider` 字段路由凭据——
+> `deepseek` 用 `LLM_API_KEY` + `LLM_BASE_URL`；`bailian`（qwen-plus）用新增的
+> `LLM_BAILIAN_API_KEY` + OpenAI 兼容 base_url（`LLM_BAILIAN_BASE_URL`，默认
+> dashscope compatible-mode）。key 未配时模型仍留在 registry（可选面展示用），
+> 但**建会话选它 → 400**（"模型 qwen-plus 未配置凭据"）。
+
+| 替代方案 | 否决理由 |
+|---|---|
+| 从 MODEL_REGISTRY 删掉 qwen-plus | registry 承担"可选面"的职责（前端选择器数据源），删了以后要加回来还得改代码；留着 + fail-fast 校验，配 key 即生效 |
+| 全部模型共用一套 key/base_url | DeepSeek 的 key 打百炼的地址必 401——两个 provider 的凭据**本来就不通用**，路由是事实不是设计 |
+
+**代价**：config 多一组可选环境变量（不配不报错，只有选了 qwen 才触发 400）；探针要多验一条路由路径。
+**重审触发**：接第三个 provider（如 GLM）→ 照 bailian 模式加一组，代价线性。
+
+---
+
 ## 六、悬而未决（明确没定，别在正文假装定了）
 
 | 项 | 现状 | 什么时候定 | 不定的后果 |

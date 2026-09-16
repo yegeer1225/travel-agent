@@ -73,6 +73,38 @@ MODEL_REGISTRY: dict[str, dict[str, object]] = {
     "qwen-plus": {"provider": "bailian", "supports_thinking": False},
 }
 
+_CREDENTIAL_BY_PROVIDER = {
+    # provider → (settings 里的 key 字段名, base_url 字段名)。加新 provider 照此扩（D56）
+    "deepseek": ("llm_api_key", "llm_base_url"),
+    "bailian": ("llm_bailian_api_key", "llm_bailian_base_url"),
+}
+
+
+def model_provider(model: str) -> str | None:
+    """模型 → provider 名。不在 registry 返回 None。"""
+    info = MODEL_REGISTRY.get(model)
+    return str(info["provider"]) if info else None
+
+
+def model_available(model: str) -> bool:
+    """会话能不能选这个模型（A45/D56）：在 registry **且**对应 provider 凭据已配。
+
+    🔴 名字在 registry ≠ 能用 —— qwen-plus 注册在案但没配百炼 key 时，
+    必须在建会话时就 400（fail-fast），不能拖到 chat 运行时才 401。
+    """
+    provider = model_provider(model)
+    if provider is None:
+        return False
+    key_field = _CREDENTIAL_BY_PROVIDER[provider][0]
+    return bool(getattr(settings, key_field, None))
+
+
+def model_supports_thinking(model: str) -> bool:
+    """`supports_thinking=False` 的模型（qwen-plus）连 thinking 参数都不该发，
+    不只是发 disabled —— 兼容层对不认识的参数可能报错也可能静默，都别赌。"""
+    info = MODEL_REGISTRY.get(model)
+    return bool(info and info.get("supports_thinking"))
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -104,6 +136,14 @@ class Settings:
     mysql_password: str = field(repr=False)
     """`repr=False`：防止密码出现在日志 / 异常堆栈 / notebook 输出里。"""
     mysql_db: str = "travel_agent"
+
+    # ---- LLM 多供应商（D56）----
+    # ⚠️ 放在数据类尾部：前面有一串无默认字段，frozen dataclass 不允许默认值插中间
+    llm_bailian_api_key: str | None = None
+    """百炼（DASHSCOPE）的 key —— **只有会话选了 qwen-plus 才需要**（D56）。
+    不配不报错；选了没配的模型在建会话时就 400（fail-fast），不会拖到 chat 运行时。"""
+    llm_bailian_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    """百炼 OpenAI 兼容端点。"""
 
     # ---- 派生量 ----
     @property
@@ -186,6 +226,10 @@ def _build() -> Settings:
         llm_model_plan=model_plan,
         llm_thinking_tool=thinking_tool,
         llm_thinking_plan=_optional("LLM_THINKING_PLAN", "enabled").lower(),
+        llm_bailian_api_key=_optional("LLM_BAILIAN_API_KEY") or None,
+        llm_bailian_base_url=_optional(
+            "LLM_BAILIAN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        ),
         amap_provider=provider,
         # ⚠️ mock 模式下不校验高德 Key：M1 阶段（以及豆包并行开工时）不需要真 Key
         amap_webservice_key=(

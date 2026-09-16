@@ -573,6 +573,9 @@ class Session(BaseModel):
 
     session_id: str
     title: str
+    model: str | None = None
+    """本会话用的 LLM（A45/D55）。**None = 跟随后端 `.env` 默认**；
+    选定后会话内固定，前端选择器只在建会话时出现。"""
     created_at: datetime
     updated_at: datetime
 
@@ -587,16 +590,22 @@ class SessionDetail(BaseModel):
 
 
 class SessionCreateRequest(BaseModel):
-    """`POST /sessions` 的 body（M5）。
+    """`POST /sessions` 的 body（M5；M7.5 加 `model`，A45/D55）。
 
     🔴 `title` 可省 —— 省略时后端给默认标题（"新的行程规划"），
     **而不是报错**：用户第一句话还没说，哪来的标题？
     首轮 chat 的意图抽取会把目的地拼进去（M6），那时再改名才符合直觉。
+
+    🔴 `model` 可省 —— 省略/None = 跟随后端 `.env` 默认。传了就**在建会话时
+    fail-fast 校验**（在 `MODEL_REGISTRY` 且凭据已配），不在 chat 运行时炸。
+    `model` 名单是**运行时配置**不是契约（后端加模型不改这里），
+    所以前端选择器的选项来自后端配置页/约定，types.ts 里它是 `string | null`。
     """
 
     model_config = ConfigDict(extra="forbid")
 
     title: str | None = Field(default=None, max_length=100)
+    model: str | None = Field(default=None, max_length=40)
 
 
 class TripSummaryItem(BaseModel):

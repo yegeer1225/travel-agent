@@ -361,21 +361,28 @@ def make_default_chat_factory() -> Any:
     懒建的原因：import 时连库/建表会把"起服务"和"有 MySQL"绑死，
     而冒烟页和读路径接口（M5）在无库环境也应可用。首次 chat 才付这个成本。
     """
-    state: dict[str, Any] = {}
+    state: dict[str, Any] = {"graphs": {}}
 
-    async def factory(session_id: str) -> ChatHandle:
-        if "handle_proto" not in state:
+    async def factory(session_id: str, model: str | None = None) -> ChatHandle:
+        """`model` = 会话级模型（A45/D55）。图按模型缓存 —— 同一会话每轮拿
+        自己模型的那张图；checkpointer 只建一份，所有模型共享（checkpoint
+        的 key 是 (thread_id=session_id)，与图实例无关）。"""
+        graphs: dict[str, Any] = state["graphs"]
+        key = model or "__default__"
+        if key not in graphs:
             from langgraph.checkpoint.mysql.aio import AIOMySQLSaver
 
             from app.config import settings
             from app.graph.graph import build_graph, build_runtime
 
-            saver_cm = AIOMySQLSaver.from_conn_string(settings.mysql_dsn_async)
-            saver = await saver_cm.__aenter__()  # 进程生命周期内持有，随进程结束释放
-            await saver.setup()  # 建 checkpoint 四张表（幂等）
-            state["saver_cm"] = saver_cm
-            state["handle_proto"] = build_graph(build_runtime(), checkpointer=saver)
-        return ChatHandle(state["handle_proto"], session_id)
+            if "saver_cm" not in state:
+                saver_cm = AIOMySQLSaver.from_conn_string(settings.mysql_dsn_async)
+                saver = await saver_cm.__aenter__()  # 进程生命周期内持有，随进程结束释放
+                await saver.setup()  # 建 checkpoint 四张表（幂等）
+                state["saver_cm"] = saver_cm
+                state["saver"] = saver
+            graphs[key] = build_graph(build_runtime(model=model), checkpointer=state["saver"])
+        return ChatHandle(graphs[key], session_id)
 
     return factory
 

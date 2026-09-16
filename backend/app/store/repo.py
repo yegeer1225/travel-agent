@@ -54,16 +54,23 @@ class SessionRepo:
     def __init__(self, conn_factory: ConnectionFactory | None = None) -> None:
         self._conn_factory = conn_factory or connect
 
-    def create(self, user_id: int, title: str | None = None, *, session_id: str | None = None) -> Session:
+    def create(
+        self,
+        user_id: int,
+        title: str | None = None,
+        *,
+        session_id: str | None = None,
+        model: str | None = None,
+    ) -> Session:
         now = utc_now()
         sid = session_id or uuid.uuid4().hex
         with closing(self._conn_factory()) as conn, conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO sessions (id, user_id, title, created_at, updated_at) "
-                "VALUES (%s, %s, %s, %s, %s)",
-                (sid, user_id, title or DEFAULT_SESSION_TITLE, now, now),
+                "INSERT INTO sessions (id, user_id, title, model, created_at, updated_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s)",
+                (sid, user_id, title or DEFAULT_SESSION_TITLE, model, now, now),
             )
-        return Session(session_id=sid, title=title or DEFAULT_SESSION_TITLE, created_at=aware(now), updated_at=aware(now))  # type: ignore[arg-type]
+        return Session(session_id=sid, title=title or DEFAULT_SESSION_TITLE, model=model, created_at=aware(now), updated_at=aware(now))  # type: ignore[arg-type]
 
     def list(self, user_id: int, *, limit: int = 20, offset: int = 0) -> tuple[list[Session], int]:
         """列表（按 updated_at 倒序）+ 满足条件的总数（分页外壳的 total 用）。"""
@@ -71,14 +78,14 @@ class SessionRepo:
             cur.execute("SELECT COUNT(*) AS n FROM sessions WHERE user_id = %s", (user_id,))
             total = int(cur.fetchone()["n"])
             cur.execute(
-                "SELECT id, title, created_at, updated_at FROM sessions "
+                "SELECT id, title, model, created_at, updated_at FROM sessions "
                 "WHERE user_id = %s ORDER BY updated_at DESC LIMIT %s OFFSET %s",
                 (user_id, limit, offset),
             )
             rows = cur.fetchall()
         items = [
             Session(
-                session_id=r["id"], title=r["title"],
+                session_id=r["id"], title=r["title"], model=r["model"],
                 created_at=aware(r["created_at"]), updated_at=aware(r["updated_at"]),
             )
             for r in rows
@@ -88,7 +95,7 @@ class SessionRepo:
     def get(self, user_id: int, session_id: str) -> Session | None:
         with closing(self._conn_factory()) as conn, conn.cursor() as cur:
             cur.execute(
-                "SELECT id, title, created_at, updated_at FROM sessions "
+                "SELECT id, title, model, created_at, updated_at FROM sessions "
                 "WHERE user_id = %s AND id = %s",
                 (user_id, session_id),
             )
@@ -96,7 +103,7 @@ class SessionRepo:
         if row is None:
             return None
         return Session(
-            session_id=row["id"], title=row["title"],
+            session_id=row["id"], title=row["title"], model=row["model"],
             created_at=aware(row["created_at"]), updated_at=aware(row["updated_at"]),
         )
 

@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Query, Response
 
 from app.api.deps import get_current_user_id, get_session_repo
 from app.api.errors import AppError
+from app.config import model_available
 from app.schemas import Page, Session, SessionCreateRequest, SessionDetail
 from app.store.repo import SessionRepo
 
@@ -30,8 +31,18 @@ def create_session(
     user_id: int = Depends(get_current_user_id),
     repo: SessionRepo = Depends(get_session_repo),
 ) -> Session:
-    """新建空会话。body 可省（标题空缺是常态 —— 用户第一句话还没说）。"""
-    return repo.create(user_id, body.title)
+    """新建空会话。body 可省（标题空缺是常态 —— 用户第一句话还没说）。
+
+    `model`（A45/D55）：可省 = 跟随 `.env` 默认；传了就**在这里 fail-fast** ——
+    不在 `MODEL_REGISTRY` 或凭据未配 → 400，绝不拖到 chat 运行时才 401/404。
+    """
+    if body.model is not None and not model_available(body.model):
+        raise AppError(
+            "invalid_param",
+            f"模型 {body.model!r} 不可用（不在可选名单，或该供应商凭据未配置）",
+            400,
+        )
+    return repo.create(user_id, body.title, model=body.model)
 
 
 @router.get("/sessions/{session_id}")

@@ -44,6 +44,7 @@ _DDL_TABLES: tuple[str, ...] = (
         id         CHAR(36)     NOT NULL,
         user_id    INT          NOT NULL,
         title      VARCHAR(100) NOT NULL,
+        model      VARCHAR(40)  NULL,
         created_at DATETIME(6)  NOT NULL,
         updated_at DATETIME(6)  NOT NULL,
         PRIMARY KEY (id),
@@ -100,6 +101,16 @@ def connect(settings: Settings) -> pymysql.connections.Connection:
     )
 
 
+_DDL_MIGRATIONS: tuple[tuple[str, str], ...] = (
+    # (判据 SQL 的列名, 迁移语句)。⚠️ CREATE TABLE IF NOT EXISTS **不会**给已存在的
+    # 表加列 —— 存量库靠这里补。判据查 information_schema，天然幂等。
+    (
+        "model",
+        "ALTER TABLE sessions ADD COLUMN model VARCHAR(40) NULL AFTER title",
+    ),
+)
+
+
 def init_db(settings: Settings) -> None:
     """建库建表（幂等）。部署/验收脚本跑一次即可。"""
     bare = pymysql.connect(
@@ -120,6 +131,15 @@ def init_db(settings: Settings) -> None:
         with bare.cursor() as cur:
             for ddl in _DDL_TABLES:
                 cur.execute(ddl)
+            for column, ddl in _DDL_MIGRATIONS:
+                cur.execute(
+                    "SELECT COUNT(*) FROM information_schema.COLUMNS "
+                    "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'sessions' AND COLUMN_NAME = %s",
+                    (settings.mysql_db, column),
+                )
+                # 裸连接不是 DictCursor，fetchone() 是元组 —— 用下标别用键名
+                if int(cur.fetchone()[0]) == 0:
+                    cur.execute(ddl)
     finally:
         bare.close()
 
