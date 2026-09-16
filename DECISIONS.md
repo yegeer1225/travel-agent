@@ -1147,6 +1147,57 @@ total_distance_km = 从「当天第一站」起算的站间里程之和
 
 ---
 
+### D46 · checkpoint 生命周期 = 首次 chat 懒建，进程内持有　`M6`　2026-09-16
+
+> **决定**：`AIOMySQLSaver` 在**第一次 chat 请求**时才连库建表（`await saver.setup()`），
+> 之后随进程生命周期持有、所有会话复用 —— 不随请求开关。
+
+| 替代方案 | 否决理由 |
+|---|---|
+| 应用启动时建（import/ lifespan 里连） | 把"起服务"和"有 MySQL"绑死：M5 的读路径接口、冒烟页在无库环境也应可用；测试起 app 还得先起库 |
+| 每个请求新建连接 | 每次 chat 多一次 TCP + 建表检查（`setup()` 要查 22 条迁移），30s 的流首帧延迟变大 |
+| 连接池按请求借还 | langgraph-checkpoint-mysql 的 saver 持有自己的连接，拆池等于绕开它的实现 |
+
+**代价**：首次 chat 的首帧延迟多一次建库检查（实测毫秒级，可接受）；
+saver 是进程级单例 —— **测试里不能用默认 factory**（会真连库），必须注入 fake（已如此）。
+**重审触发**：多 worker 部署（uvicorn --workers >1）时，每个进程各自持有 saver 是否触达连接数上限。
+
+---
+
+### D47 · steer（插队）= `update_state` 写 `pending_messages`，不用 interrupt/HITL　`M6`　2026-09-16
+
+> **决定**：插队实现为一次 LangGraph `update_state` —— 先读当前 `pending_messages` 再追加写回
+> （该键**无 reducer**，覆盖语义，直接写 `[msg]` 会冲掉没被消费的旧插话）；
+> 正在跑的节点**不会被打断**，插话在下一个 `agent_step` 被 drain。
+
+| 替代方案 | 否决理由 |
+|---|---|
+| LangGraph `interrupt()` + `Command(resume=...)` | 人机交互范式是为"节点**开跑前**等人批准"设计的；插队发生在"节点跑着呢"——要中断得重新设计 SSE 事件流（前端收到 interrupt 该显示什么？契约已冻结，改 = 双倍成本） |
+| 独立队列（Redis / 进程内）+ 节点轮询 | 多一个状态存储，且 checkpoint 里已有 `pending_messages` 键 —— 两处状态必然漂移 |
+
+**代价**：插话**不即时生效**（当前节点跑完才被读到）——用户体感"我说了它没反应"最多持续一个节点的时长（最长的节点是 agent_step，约 10~30s）；steer 返回 `ok:true` 只代表"写进了"，**不代表"会被采纳"**。
+**重审触发**：用户实测反馈"插话永远没反应"（说明 drain 逻辑漏消费）→ 再考虑 interrupt 方案。
+
+---
+
+### D48 · 终态取根 run 的 `on_chain_end`，路由层再兜一道 done　`M6`　2026-09-16
+
+> **决定**：① 流终态从**根 run 的 `on_chain_end` output** 拿（`parent_ids` 为空），不用 `aget_state`；
+> ② 节点计时起点存本地 `node_t0` 字典，不塞进事件 dict；
+> ③ `_sse_body` 对句柄流的异常再兜一层：补发 `error + done` —— "error 后必发 done"是**双保险**。
+
+| 替代方案 | 否决理由（全部**实测踩过**，不是推测） |
+|---|---|
+| `aget_state(config)` 拿终态 | 无 checkpointer 的图（CLI/测试路径）直接抛 `No checkpointer set` |
+| 计时起点写进 `ev["data"]["_t0"]` | start/end 是**两个独立的事件 dict**，存进去 end 里取不到 → `elapsed_ms` 恒 None（测试抓到） |
+| 只靠 `graph_chat_stream` 的 producer except 转错误帧 | 那层漏了（或测试替身抛异常）客户端就遇到**无声死流**：HTTP 200 + EOF 没 done = 前端按"断流"提示，与业务错误混为一谈 |
+
+**代价**：终态依赖"根 run output = 最终 state"这个 LangGraph 实现细节（若升级后根 output 语义变化，终态会拿空 → 走"流程结束但没产出"的错误分支，**会报错而不是静默错**，可接受）；
+路由兜底分支里的异常**跳过落库**（行程可能收到一半就断了，落一半不如不落）。
+**重审触发**：langgraph 升级后根 run 的 output 不再等于最终 state（发现方式：happy path 测试红）。
+
+---
+
 ## 六、悬而未决（明确没定，别在正文假装定了）
 
 | 项 | 现状 | 什么时候定 | 不定的后果 |

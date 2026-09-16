@@ -53,6 +53,7 @@ from typing import Any
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from pydantic import ValidationError
 
@@ -451,7 +452,7 @@ class Nodes:
     #  ③ tool_step —— L2 里的工具侧
     # ══════════════════════════════════════════════════════════
 
-    async def tool_step(self, state: dict[str, Any]) -> dict[str, Any]:
+    async def tool_step(self, state: dict[str, Any], config: RunnableConfig | None = None) -> dict[str, Any]:
         """执行上一条 AI 消息里的**全部** `tool_calls`。
 
         🔴 **逐个回应，一条都不能漏。**漏一条 → 用户看到的是一次莫名其妙的 400
@@ -529,7 +530,11 @@ class Nodes:
                     continue
 
                 try:
-                    raw = await tool.ainvoke(args)
+                    # config 显式传下去：让这次工具调用挂进 astream_events 的事件树
+                    # （M6 SSE 的 tool_call/tool_result 事件靠它把"直接父"判定为
+                    # tool_step，从而与子 agent 内部的搜索区分开）。不传也能靠
+                    # 环境回调偶然挂上，但那是实现细节，不该依赖。
+                    raw = await tool.ainvoke(args, config=config)
                     text = raw if isinstance(raw, str) else json.dumps(raw, ensure_ascii=False)
                 except Exception as exc:  # noqa: BLE001 —— 异常也必须变成回应
                     text = (

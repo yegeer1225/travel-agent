@@ -15,6 +15,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -22,7 +24,8 @@ from pathlib import Path
 
 from app.api.errors import register_handlers
 from app.api.ratelimit import GLOBAL_IP, SlidingWindowLimiter, make_dependency
-from app.api.routes import health, sessions, trips
+from app.api.registry import ActiveChatRegistry
+from app.api.routes import chat, health, sessions, trips
 from app.config import settings
 from app.store.db import connect
 from app.store.memory import InMemorySessionStore, InMemoryTripStore
@@ -43,8 +46,9 @@ def create_app(
     session_repo: SessionRepo | InMemorySessionStore | None = None,
     trip_repo: TripRepo | InMemoryTripStore | None = None,
     limiter: SlidingWindowLimiter | None = None,
+    chat_factory: Any | None = None,
 ) -> FastAPI:
-    """造一个应用实例。三个依赖都能注入 —— 测试换内存替身，生产不传（真库）。"""
+    """造一个应用实例。依赖都能注入 —— 测试换内存替身与 fake，生产不传（真库）。"""
     app = FastAPI(title="智能旅游规划系统", version="0.1.0")
 
     # ── 依赖落位（路由经 request.app.state 取用，见 deps.py）──
@@ -64,6 +68,20 @@ def create_app(
     app.include_router(health.router, prefix="/api", dependencies=[global_limit])
     app.include_router(sessions.router, prefix="/api", dependencies=[global_limit])
     app.include_router(trips.router, prefix="/api", dependencies=[global_limit])
+
+    # ── M6：chat SSE ──
+    # chat_factory 默认 = 真 LangGraph + AIOMySQLSaver（懒建，见 chat_stream.py）；
+    # 测试注入 fake（只实现三个方法），全链路不连库不连 LLM。
+    if chat_factory is None:
+        from app.api.chat_stream import make_default_chat_factory
+
+        chat_factory = make_default_chat_factory()
+    app.state.chat_factory = chat_factory
+    app.state.active_chats = ActiveChatRegistry()
+
+    # chat 自身的限流（10/h·30/天）在路由体内手动查 —— 它要先读 body 判断
+    # 是不是 steer（插队不占配额），不能放在"读 body 之前"的依赖里。
+    app.include_router(chat.router, prefix="/api", dependencies=[global_limit])
 
     register_handlers(app)
 

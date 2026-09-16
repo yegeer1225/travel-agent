@@ -17,17 +17,21 @@
   li.ok .icon { color: var(--ok); }
   li.bad { background:#fff3f3; }
   li.bad .icon { color: var(--bad); }
+  li.warn { background:#fffbe6; }
+  li.warn .icon { color:#d9a400; }
   li pre { margin:0; font-size:12px; color:#c33; white-space:pre-wrap; word-break:break-all; }
   #summary { margin-top:16px; font-weight:bold; font-size:15px; }
 </style>
 </head>
 <body>
-<h1>后端冒烟自检（M5 读路径）</h1>
+<h1>后端冒烟自检（M5 读路径 + M6 SSE）</h1>
 <p class="note">
-  这是<strong>联调验证工具</strong>，不是产品前端——它从浏览器真实地打一遍 M5 已上线的端点，
-  验证「HTTP 行为」与契约一致（错误形状、404 语义、分页、删除语义）。
+  这是<strong>联调验证工具</strong>，不是产品前端——它从浏览器真实地打一遍已上线的端点，
+  验证「HTTP 行为」与契约一致（错误形状、404 语义、分页、删除语义、SSE 流启动）。
   产品前端由豆包按 <code>前端交接.md</code> 另行实现。<br />
-  用法：后端起服务后打开本页，点「开始自检」。M6 chat SSE 上线后此处会追加 SSE 帧解析检查。
+  用法：后端起服务后打开本页，点「开始自检」。
+  SSE 检查只验证<strong>流启动与首帧</strong>，读到首帧立即断开 —— <strong>不会真的跑一轮 agent</strong>（不花 LLM 钱）；
+  其中「SSE 启动」需要 MySQL（checkpoint 库），Docker 没起时该项会标黄跳过。
 </p>
 <button id="run">开始自检</button>
 <ul id="list"></ul>
@@ -44,6 +48,13 @@ function row(name) {
   $list.appendChild(li);
   return {
     pass() { li.className = "ok"; li.querySelector(".icon").textContent = "✓"; },
+    warn(info) {
+      li.className = "warn";
+      li.querySelector(".icon").textContent = "⚠";
+      const pre = document.createElement("pre");
+      pre.textContent = info;
+      li.appendChild(pre);
+    },
     fail(info) {
       li.className = "bad";
       li.querySelector(".icon").textContent = "✗";
@@ -145,23 +156,90 @@ const CHECKS = [
         return "RequestValidationError 漏网：" + JSON.stringify(r.body);
     },
   },
+  // ════════ M6：chat SSE（流启动前的校验分支不碰图，安全） ════════
+  {
+    name: "POST /api/sessions（为 SSE 检查再建一个探针会话）",
+    async run(ctx) {
+      const r = await call("POST", "/api/sessions", { title: "SSE 探针" });
+      if (r.status !== 200) return `status=${r.status} body=${JSON.stringify(r.body)}`;
+      ctx.sid2 = r.body.session_id;
+    },
+  },
+  {
+    name: "POST chat 空 message → 400 invalid_param（进流之前就拦下）",
+    async run(ctx) {
+      const r = await call("POST", `/api/sessions/${ctx.sid2}/chat`, { message: "   " });
+      if (r.status !== 400) return `status=${r.status} body=${JSON.stringify(r.body)}`;
+      if (r.body?.error?.code !== "invalid_param") return "错误形状不对：" + JSON.stringify(r.body);
+    },
+  },
+  {
+    name: "POST chat 不存在的会话 → 404 not_found（归属校验在起流之前）",
+    async run() {
+      const r = await call("POST", "/api/sessions/no-such-sid/chat", { message: "去成都" });
+      if (r.status !== 404) return `status=${r.status} body=${JSON.stringify(r.body)}`;
+      if (r.body?.error?.code !== "not_found") return "错误形状不对：" + JSON.stringify(r.body);
+    },
+  },
+  {
+    name: "POST chat steer=true 且无进行中的流 → 400（steer 返回 JSON 不是 SSE）",
+    async run(ctx) {
+      const r = await call("POST", `/api/sessions/${ctx.sid2}/chat`, { message: "改一下", steer: true });
+      if (r.status !== 400) return `status=${r.status} body=${JSON.stringify(r.body)}`;
+      if (r.body?.error?.code !== "invalid_param") return "错误形状不对：" + JSON.stringify(r.body);
+    },
+  },
+  {
+    name: "POST chat 正常 → text/event-stream + 首帧 id:0 是 session（读到即断开，不跑 agent）",
+    async run(ctx) {
+      const ctrl = new AbortController();
+      let resp;
+      try {
+        resp = await fetch(`/api/sessions/${ctx.sid2}/chat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: "自检探针" }),
+          signal: ctrl.signal,
+        });
+      } catch (e) { return "请求失败：" + e.message; }
+      if (resp.status !== 200) {
+        const txt = await resp.text().catch(() => "");
+        if (resp.status === 500)
+          return { skip: true, info: "500 —— chat 需要 MySQL（checkpoint 库），Docker 没起时此项跳过" };
+        return `status=${resp.status} body=${txt.slice(0, 200)}`;
+      }
+      const ct = resp.headers.get("content-type") || "";
+      if (!ct.startsWith("text/event-stream"))
+        return `content-type=${ct}（应为 text/event-stream）`;
+      const reader = resp.body.getReader();
+      const { value } = await reader.read();
+      const head = new TextDecoder().decode(value || new Uint8Array());
+      ctrl.abort(); // 首帧一到立刻断开：服务端走 CancelledError 清守卫，agent 不会真跑
+      const first = head.split("\n\n")[0] || "";
+      if (!first.startsWith("id: 0")) return `首帧缺 id:0 → ${head.slice(0, 120)}`;
+      if (!first.includes('"type":"session"') && !first.includes('"type": "session"'))
+        return `首帧不是 session 事件 → ${head.slice(0, 120)}`;
+    },
+  },
 ];
 
 $run.addEventListener("click", async () => {
   $run.disabled = true;
   $list.innerHTML = "";
   $summary.textContent = "";
-  let failed = 0;
+  let failed = 0, skipped = 0;
   const ctx = {};
   for (const check of CHECKS) {
     const r = row(check.name);
     let err = null;
     try { err = await check.run(ctx); }
     catch (e) { err = `网络/代码异常：${e.message}（后端没起？）`; }
-    if (err) { r.fail(err); failed++; } else { r.pass(); }
+    if (err && err.skip) { r.warn(err.info); skipped++; }
+    else if (err) { r.fail(err); failed++; }
+    else { r.pass(); }
   }
   $summary.textContent = failed === 0
-    ? `✅ ${CHECKS.length}/${CHECKS.length} 全部通过 —— M5 的 HTTP 行为与契约一致，可以把交接包给豆包了`
+    ? `✅ ${CHECKS.length - skipped}/${CHECKS.length} 通过` + (skipped ? `（${skipped} 项跳过）` : "") + " —— HTTP 与 SSE 启动行为与契约一致，可以把交接包给豆包了"
     : `✗ ${failed} 项失败 —— 先修再交接，失败详情见上方红行`;
   $run.disabled = false;
 });

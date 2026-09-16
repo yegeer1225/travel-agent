@@ -151,12 +151,15 @@ def build_runtime(
     )
 
 
-def build_graph(nodes: Nodes) -> CompiledStateGraph:
+def build_graph(nodes: Nodes, checkpointer: Any | None = None) -> CompiledStateGraph:
     """把 9 个节点和 6 条边接起来。
 
     条件边的路由函数**定义在这里而不是 nodes.py**：
     路由是"图的形状"，属于本文件；节点是"一步做什么"，属于 `nodes.py`。
     混在一起会让"这个图长什么样"要在两个文件之间来回翻。
+
+    `checkpointer`：M6 chat 传 `AIOMySQLSaver`（按 `thread_id=session_id` 存取，
+    同一会话多轮对话靠它续上下文）；CLI / 测试不传（无跨轮状态）。
     """
 
     # ══════════════════════════════════════════════════════════
@@ -259,7 +262,7 @@ def build_graph(nodes: Nodes) -> CompiledStateGraph:
     builder.add_edge("ask_more", END)
     builder.add_edge("render", END)
 
-    return builder.compile()
+    return builder.compile(checkpointer=checkpointer)
 
 
 # ══════════════════════════════════════════════════════════════

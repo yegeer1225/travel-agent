@@ -14,8 +14,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
-from app.schemas import Session, Trip, TripSummaryItem
+from app.schemas import ChatMessage, MessageMeta, MessageRole, Session, Trip, TripSummaryItem
 from app.store.repo import DEFAULT_SESSION_TITLE
 
 
@@ -62,6 +63,42 @@ class InMemorySessionStore:
             return False
         del self._rows[session_id]
         return True
+
+    # ══════════ M6：消息（与 MySQL 版同签名） ══════════
+
+    def append_message(
+        self,
+        user_id: int,
+        session_id: str,
+        *,
+        role: str,
+        content: str,
+        meta: dict[str, Any] | None = None,
+    ) -> ChatMessage:
+        row = self._rows.get(session_id)
+        if row is None or row["user_id"] != user_id:
+            raise KeyError(session_id)
+        now = _now()
+        msg = ChatMessage(
+            id=uuid.uuid4().hex, role=MessageRole(role), content=content,
+            meta=MessageMeta.model_validate(meta) if meta else None, created_at=now,
+        )
+        row.setdefault("messages", []).append(msg)
+        row["updated_at"] = now
+        return msg
+
+    def list_messages(self, user_id: int, session_id: str) -> list[ChatMessage]:
+        row = self._rows.get(session_id)
+        if row is None or row["user_id"] != user_id:
+            raise KeyError(session_id)
+        return list(row.get("messages", []))
+
+    def update_title(self, user_id: int, session_id: str, title: str) -> None:
+        row = self._rows.get(session_id)
+        if row is None or row["user_id"] != user_id:
+            raise KeyError(session_id)
+        row["title"] = title[:100]
+        row["updated_at"] = _now()
 
 
 class InMemoryTripStore:

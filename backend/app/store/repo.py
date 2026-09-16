@@ -31,7 +31,16 @@ from typing import Any
 import pymysql.connections
 import pymysql.cursors
 
-from app.schemas import Session, Trip, TripSource, TripSummary, TripSummaryItem
+from app.schemas import (
+    ChatMessage,
+    MessageMeta,
+    MessageRole,
+    Session,
+    Trip,
+    TripSource,
+    TripSummary,
+    TripSummaryItem,
+)
 from app.store.db import aware, connect, utc_now
 
 DEFAULT_SESSION_TITLE = "新的行程规划"
@@ -99,6 +108,73 @@ class SessionRepo:
                 (user_id, session_id),
             )
         return n > 0
+
+    # ══════════ M6：消息（chat 的落库面） ══════════
+
+    def append_message(
+        self,
+        user_id: int,
+        session_id: str,
+        *,
+        role: str,
+        content: str,
+        meta: dict[str, Any] | None = None,
+    ) -> ChatMessage:
+        """存一条消息并 touch 会话的 updated_at（列表按它倒序 —— 聊过的会话浮上来）。
+
+        归属校验靠先查会话（`user_id` 进 WHERE）：会话不存在 / 不是你的，
+        这里直接 404，**绝不会往别人的会话里写消息**。
+        """
+        with closing(self._conn_factory()) as conn, conn.cursor() as cur:
+            cur.execute("SELECT id FROM sessions WHERE user_id = %s AND id = %s", (user_id, session_id))
+            if cur.fetchone() is None:
+                raise KeyError(session_id)  # 路由层转 404（统一 not_found）
+            now = utc_now()
+            mid = uuid.uuid4().hex
+            cur.execute(
+                "INSERT INTO messages (id, session_id, role, content, meta_json, created_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s)",
+                (mid, session_id, role, content, json.dumps(meta, ensure_ascii=False) if meta else None, now),
+            )
+            cur.execute("UPDATE sessions SET updated_at = %s WHERE id = %s", (now, session_id))
+        return ChatMessage(
+            id=mid, role=MessageRole(role), content=content,
+            meta=MessageMeta.model_validate(meta) if meta else None,
+            created_at=aware(now),  # type: ignore[arg-type]
+        )
+
+    def list_messages(self, user_id: int, session_id: str) -> list[ChatMessage]:
+        """会话的全部消息（按时间正序 —— 对话是从上往下读的）。"""
+        with closing(self._conn_factory()) as conn, conn.cursor() as cur:
+            cur.execute("SELECT id FROM sessions WHERE user_id = %s AND id = %s", (user_id, session_id))
+            if cur.fetchone() is None:
+                raise KeyError(session_id)
+            cur.execute(
+                "SELECT id, role, content, meta_json, created_at FROM messages "
+                "WHERE session_id = %s ORDER BY created_at ASC, id ASC",
+                (session_id,),
+            )
+            rows = cur.fetchall()
+        items: list[ChatMessage] = []
+        for r in rows:
+            meta_raw = _loads(r["meta_json"]) if r["meta_json"] else None
+            items.append(
+                ChatMessage(
+                    id=r["id"], role=MessageRole(r["role"]), content=r["content"],
+                    meta=MessageMeta.model_validate(meta_raw) if meta_raw else None,
+                    created_at=aware(r["created_at"]),  # type: ignore[arg-type]
+                )
+            )
+        return items
+
+    def update_title(self, user_id: int, session_id: str, title: str) -> None:
+        """改标题。M6 首轮生成行程后，把「新的行程规划」换成「成都 · 3 天」。"""
+        with closing(self._conn_factory()) as conn, conn.cursor() as cur:
+            cur.execute(
+                "UPDATE sessions SET title = %s, updated_at = %s "
+                "WHERE user_id = %s AND id = %s",
+                (title[:100], utc_now(), user_id, session_id),
+            )
 
 
 class TripRepo:

@@ -42,15 +42,14 @@ def get_session(
 ) -> SessionDetail:
     """会话 + 全部历史消息。
 
-    ⚠️ M5 阶段 `messages` 恒为空 —— 消息由 M6 的 chat 落库。
-    但路由现在就把 404 语义、归属校验做对（见 `_get_owned`），
-    M6 接消息时这里只加一行查询。
+    归属校验在 repo 的 WHERE 里（`user_id` 是第一个位置参数，D31 防线）——
+    别人的 session_id 在这里**查询不到**，自然落进 404，不会 403。
     """
     session = repo.get(user_id, session_id)
     if session is None:
         # 🔴 404 语义（api.md 1.2）：不存在 = 无权访问，对外一律 not_found，不许 403
         raise AppError("not_found", "会话不存在", 404)
-    return SessionDetail(session=session, messages=[])
+    return SessionDetail(session=session, messages=repo.list_messages(user_id, session_id))
 
 
 @router.delete("/sessions/{session_id}", status_code=204)
