@@ -131,10 +131,33 @@ def build_soft_llm() -> ChatOpenAI:
     )
 
 
+def build_sub_llm() -> ChatOpenAI:
+    """给搜索子 agent 的规划轮用（M4）：**不挂 tools + 关思考 + temperature=0**。
+
+    与 `build_extract_llm` / `build_soft_llm` 同形，但仍单独开一个工厂，
+    理由同 soft：现在同形是**巧合**，将来分化（比如给子 agent 换更便宜的
+    模型）不该牵连别的节点。
+
+    为什么关思考：关键词选择是"看结果、换角度"的浅层决策，CoT 用不上；
+    而 `temperature=0` 让"同一份搜索结果"稳定产出同一个下一步 ——
+    子 agent 的多轮试错才可测。
+
+    ⚠️ 成本账：一次 `task` = 最多 `MAX_SUB_ROUNDS`(4) 次本档调用。
+    这是 D5 明确接受的开销（"单次请求多 1 次模型调用"在多轮版子 agent
+    上摊开后就是这个数），不是回归。
+    """
+    return _build(
+        settings.llm_model_tool,
+        "disabled",
+        temperature=0,
+    )
+
+
 __all__ = [
     "DEFAULT_TIMEOUT",
     "build_extract_llm",
     "build_plan_llm",
     "build_soft_llm",
+    "build_sub_llm",
     "build_tool_llm",
 ]

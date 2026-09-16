@@ -386,8 +386,8 @@ done
 ── 用户第二轮 ────────────────────────────────────────────
 session            （恢复会话）
 node    agent_step    start
-tool_call  search_poi
-tool_result search_poi
+tool_call  task                        ← M4 起搜索走子 agent（主 agent 无 search_poi）
+tool_result task
 tool_call  get_weather
 tool_result get_weather
 node    agent_step    end

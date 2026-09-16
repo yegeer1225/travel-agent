@@ -169,10 +169,28 @@ def rank_pois(pois: list[AmapPoi]) -> list[AmapPoi]:
     return sorted(pois, key=lambda p: rank_of(p.type))
 
 
+def is_visit_type(type_str: str | None) -> bool:
+    """这个类型能不能当行程里的一站（M4 子 agent 的降级清单用它过滤）。
+
+    判据 = `rank_of` 落在具名档位且**不是住宿**：
+
+    - 兜底档（`RANK_FALLBACK`）排除 —— 那是交通设施 / 道路 / 政企机构，
+      正是「poi_id 真 ≠ 可用」（坑 25）里那批混池子的东西
+    - 住宿排除 —— 行程从来不排住宿（D1 的既定口径），
+      降级清单里混进酒店会诱导生成节点把它排进去
+
+    ⚠️ 它**只用于"没有更好的选择"的场合**（子 agent 预算用尽的降级清单）。
+    正常路径的挑选由模型做，这里不做任何替代判断。
+    """
+    rank = rank_of(type_str)
+    return rank < RANK_FALLBACK and rank != RANK_BY_MAJOR["住宿服务"]
+
+
 __all__ = [
     "NON_VISIT_LEAVES",
     "RANK_BY_MAJOR",
     "RANK_FALLBACK",
+    "is_visit_type",
     "label_of",
     "majors_of",
     "rank_of",

@@ -135,3 +135,59 @@ def test_every_status_has_an_icon(status: str) -> None:
     out = run_cli._fmt_checks([{"code": "x", "level": "hard", "status": status}])
     assert out == f"x{run_cli._CHECK_ICON[status]}"
     assert "?" not in out
+
+
+# ══════════════════════════════════════════════════════════════
+#  M4：子 agent trace 的渲染
+# ══════════════════════════════════════════════════════════════
+
+
+def test_fmt_trace_shows_searches_keywords_and_returns() -> None:
+    record = {
+        "objective": "成都的历史古迹",
+        "city": "成都",
+        "rounds": 2,
+        "searches": 2,
+        "keywords": ["武侯祠", "锦里"],
+        "returned": 3,
+        "degraded": False,
+        "llm_failed": False,
+    }
+    text = run_cli._fmt_trace(record)
+    assert "成都的历史古迹" in text
+    assert "武侯祠、锦里" in text
+    assert "2 次搜索" in text
+    assert "返回 3 条" in text
+    assert "降级" not in text and "失败" not in text, "正常路径不该出现警告标记"
+
+
+def test_fmt_trace_marks_degradation_loudly() -> None:
+    """🔴 降级必须显眼 —— 静默降级让人分不清"模型笨"还是"输入本来就烂"。"""
+    record = {
+        "objective": "任务",
+        "city": "成都",
+        "rounds": 4,
+        "searches": 3,
+        "keywords": ["景点"],
+        "returned": 8,
+        "degraded": True,
+        "llm_failed": False,
+    }
+    assert "降级" in run_cli._fmt_trace(record)
+
+
+def test_fmt_trace_handles_empty_keywords() -> None:
+    """一个词都没搜成时不能打出「关键词：」后面一片空白还带顿号。"""
+    record = {
+        "objective": "任务",
+        "city": "成都",
+        "rounds": 1,
+        "searches": 0,
+        "keywords": [],
+        "returned": 0,
+        "degraded": False,
+        "llm_failed": True,
+    }
+    text = run_cli._fmt_trace(record)
+    assert "关键词：无" in text
+    assert "规划失败" in text

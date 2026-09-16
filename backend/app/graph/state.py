@@ -95,6 +95,19 @@ class TripState(TypedDict, total=False):
     collected_weather: dict[str, dict[str, Any]]
     """日期 → 天气 dump。同样为了恢复。"""
 
+    subagent_trace: Annotated[list[Any], operator.add]
+    """每次 `task`（搜索子 agent）调用的过程记录，`tool_step` 只返回**本次新增**。
+
+    为什么用 `operator.add` 而不是"节点自己合并全量"：合并要自己拼历史，
+    漏拼一次就**静默丢一段 trace**；add 语义下每个 tool_step 只对自己的
+    新增负责 —— 和 `tool_call_count` 一个道理。
+
+    这是 M4 验收「主 agent 的 trace 里能看到它调了子 agent」的落点，
+    也是 M6 过程可视化（前端画"子 agent 在搜什么"）的数据来源。
+    每条记录：`objective / city / rounds / searches / keywords /
+    returned / degraded / llm_failed`。
+    """
+
     # ══════════ 产物 ══════════
     draft: dict[str, Any]
     """模型出的**精简草稿**（只有 station 骨架，见 `graph/draft.py`）。

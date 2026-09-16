@@ -83,6 +83,8 @@ from app.schemas import (
     Weather,
 )
 from app.tools.poi_pool import PoiPool, poi_pool_scope
+from app.graph.subagent import drain_subagent_trace, subagent_trace_scope
+from app.utils import text_of
 
 # ══════════════════════════════════════════════════════════════
 #  D25 的三个上限
@@ -128,13 +130,14 @@ LLM_FAIL_TEXT = (
 
 AGENT_SYSTEM_PROMPT = """你是行程规划助手。**你现在的工作是收集事实，不是写行程。**
 
-你有三个工具：搜索地点、查天气、计算两地驾车距离。
+搜索地点由**搜索子 agent** 负责：你用 `task` 工具给它派活，它搜完给你一份带 id 的精选清单。
+天气和距离由你直接查（工具：查天气、算驾车距离）。
 
 工作方式：
 
-1. 按用户的偏好搜候选地点。**每个偏好搜 1~2 个关键词就够** ——
-   比如"历史古迹"搜一次、"当地小吃"搜一次，**不要反复搜相似的关键词**。
-   总共 6~10 次调用已经足够，超过就是重复劳动。
+1. 按用户偏好拆成 1~3 个搜索任务，每个任务一次 `task` 调用。
+   任务描述必须**自包含**（城市 + 找什么 + 约束），因为子 agent 看不到我们的对话。
+   比如一个任务找景点、一个任务找吃的。不要派 4 个以上。
 2. 需要判断顺序是否合理时，用算距离工具查相邻两站的车程。
    **不需要为了每一对站点都算一遍**，只算你打算真正相邻的那几对。
 3. 如果行程日期在天气可查范围内，查一下天气（一天一次就够）。
@@ -142,11 +145,11 @@ AGENT_SYSTEM_PROMPT = """你是行程规划助手。**你现在的工作是收�
 
 硬规则（违反会导致整份行程作废）：
 
-- **所有地点都必须来自 search_poi 的返回**，必须用返回里的 id。
+- **所有地点都必须来自 task 返回的清单**，必须用清单里的 id。
   绝对不要凭记忆或常识写任何地点名或 id。
-- 搜不到就换关键词。换两次还是搜不到，就**少安排一个站点**，
+- 清单不合适就再派一次任务、换个描述。还是找不到就**少安排一个站点**，
   **不要编一个出来** —— 少一站是"信息不足"，编一站是"数据造假"。
-- 算距离时只用已经搜出来的 id，不要自己估距离或时间。
+- 算距离时只用清单里出现过的 id，不要自己估距离或时间。
 - **不要输出 JSON，不要写完整行程表。** 你只负责收集和判断，
   最终结构由后面的节点生成。
 """
@@ -174,26 +177,6 @@ PLAN_JSON_REMINDER = """输出格式（严格遵守，字段名一个都不能�
 # ══════════════════════════════════════════════════════════════
 #  小工具
 # ══════════════════════════════════════════════════════════════
-
-
-def _text_of(message: AnyMessage) -> str:
-    """把模型返回的 `content` 取成字符串。
-
-    ⚠️ `content` 不一定是 `str` —— 多模态返回是 `list[dict]`。
-    直接 `.strip()` 会在那种情况下抛 `AttributeError`，
-    而它只在"模型返回了非文本内容"时才出现，很难复现。
-    """
-    content = getattr(message, "content", "")
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = [
-            str(part.get("text", ""))
-            for part in content
-            if isinstance(part, dict) and part.get("type") == "text"
-        ]
-        return "".join(parts)
-    return str(content)
 
 
 def _pool_from_state(state: dict[str, Any]) -> PoiPool:
@@ -299,7 +282,9 @@ class Nodes:
     """9 个节点 + 它们共用的依赖。
 
     做成一个类而不是 9 个模块级函数，是为了让**依赖可见**：
-    图要跑起来必须凑齐 provider / 四个 LLM / 三个工具，
+    图要跑起来必须凑齐 provider / 四个 LLM / 三个工具
+    （搜索子 agent 在 `build_runtime` 里已被包成 `task` 工具 ——
+    对 `Nodes` 来说它只是一个普通工具，子图的存在对节点透明），
     这些在 `graph.py` 里一次性组装，节点函数本身不带全局状态，
     测试里可以整体替换（塞 mock provider、塞假 LLM）。
     """
@@ -374,7 +359,7 @@ class Nodes:
                 "error": f"需求抽取调用失败：{type(exc).__name__}: {exc}",
             }
 
-        parsed, err = parse_intent_json(_text_of(raw))
+        parsed, err = parse_intent_json(text_of(raw))
         if parsed is None:
             return {
                 "requirements": existing,
@@ -510,7 +495,10 @@ class Nodes:
         used_calls = state.get("tool_call_count") or 0
         allowed = max(0, self.max_tool_calls - used_calls)
 
-        with poi_pool_scope(pool) as active:
+        # trace 作用域与池子作用域同层：task 工具（搜索子 agent）执行期间
+        # 往里写过程记录，节点结束时 drain 回 state —— 这就是 M4 验收里
+        # "主 agent 的 trace 里能看到它调了子 agent"的落点。
+        with poi_pool_scope(pool) as active, subagent_trace_scope():
             for index, call in enumerate(calls):
                 name = str(call.get("name") or "")
                 args = call.get("args") or {}
@@ -553,11 +541,13 @@ class Nodes:
                 results.append(ToolMessage(content=text, tool_call_id=call_id, name=name))
 
             snapshot = _pool_dump(active)
+            sub_trace = drain_subagent_trace()
 
         update: dict[str, Any] = {
             "messages": results,
             "tool_call_count": len(calls),
             "collected_pois": snapshot,
+            "subagent_trace": sub_trace,  # add reducer → 只追加本次新增，历史由 state 保着
         }
         if errors:
             update["error"] = "工具执行出错：" + "；".join(errors)
@@ -614,7 +604,7 @@ class Nodes:
             except Exception as exc:  # noqa: BLE001
                 return {"error": f"生成节点模型调用失败：{type(exc).__name__}: {exc}"}
 
-            draft, last_err = parse_draft(_text_of(raw))
+            draft, last_err = parse_draft(text_of(raw))
             if draft is not None:
                 return {"draft": draft.model_dump(mode="json")}
 

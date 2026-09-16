@@ -102,7 +102,8 @@ def build_runtime(
     节点本身只依赖 `Nodes` 这个形状，所以测试里可以整个换掉
     （塞 mock provider、塞假 LLM），不需要动图结构。
     """
-    from app.llm import build_extract_llm, build_plan_llm, build_soft_llm, build_tool_llm
+    from app.graph.subagent import build_search_subagent, build_task_tool
+    from app.llm import build_extract_llm, build_plan_llm, build_soft_llm, build_sub_llm, build_tool_llm
     from app.providers.mock import MOCK_CITY, MockAmapProvider
 
     if provider is not None:
@@ -125,9 +126,23 @@ def build_runtime(
     default_city = MOCK_CITY
 
     tools = build_amap_tools(active_provider, default_city=default_city)
+    by_name = {t.name: t for t in tools}
+
+    # ══════════ M4（D5）：搜索整体移交给子 agent ══════════
+    # 主 agent 的工具集里**没有 search_poi** —— 留着它，模型永远直搜
+    # （一步到位 token 更少），task 成摆设，上下文隔离名存实亡。
+    # 子 agent 内部复用同一个 search_poi 实例：在 tool_step 的池子作用域内
+    # 执行，搜到的 POI 自动进主候选池，封闭世界不破（见 subagent.py docstring）。
+    subgraph = build_search_subagent(llm=build_sub_llm(), search_tool=by_name["search_poi"])
+    main_tools = [
+        build_task_tool(subgraph=subgraph, default_city=default_city),
+        by_name["get_weather"],
+        by_name["calc_distance"],
+    ]
+
     return Nodes(
         provider=active_provider,
-        tools=tools,
+        tools=main_tools,
         llm_tool=build_tool_llm(),
         llm_plan=build_plan_llm(),
         llm_extract=build_extract_llm(),
@@ -276,6 +291,7 @@ def initial_state(
         "tool_call_count": 0,
         "agent_rounds": 0,
         "check_rounds": 0,
+        "subagent_trace": [],
         "pending_messages": list(pending_messages or []),
         "requirements": {},
         "missing_required": [],
