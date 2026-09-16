@@ -311,15 +311,31 @@ class ChatHandle:
 
     路由对图的全部接触点收在这一个类里 —— 测试注入的 fake 句柄
     只需要实现 `has_checkpoint / steer / stream` 三个方法。
+
+    `closer`（D59）：句柄持有的资源释放钩子（比如 checkpointer 的 MySQL 连接）。
+    **请求级连接**要求流结束时必须归还 —— 客户端断开（CancelledError）与
+    正常走完两条路径都要走到 `aclose`，路由的 finally 负责调它。
     """
 
-    def __init__(self, graph: CompiledStateGraph, session_id: str) -> None:
+    def __init__(
+        self,
+        graph: CompiledStateGraph,
+        session_id: str,
+        *,
+        closer: Any | None = None,
+    ) -> None:
         self.graph = graph
         self.session_id = session_id
+        self._closer = closer
         self.config: RunnableConfig = {
             "configurable": {"thread_id": session_id},
             "recursion_limit": RECURSION_LIMIT,
         }
+
+    async def aclose(self) -> None:
+        """释放句柄持有的资源（无 closer = no-op，测试替身不需要实现）。"""
+        if self._closer is not None:
+            await self._closer()
 
     async def has_checkpoint(self) -> bool:
         """这个会话有没有历史轮次（决定输入用合并语义还是全新初始化）。"""
@@ -356,33 +372,45 @@ class ChatHandle:
 
 
 def make_default_chat_factory() -> Any:
-    """生产用的会话句柄工厂：懒建图 + AIOMySQLSaver（进程生命周期内复用）。
+    """生产用的会话句柄工厂：**每请求一条独立的 checkpointer 连接**（D59）。
 
-    懒建的原因：import 时连库/建表会把"起服务"和"有 MySQL"绑死，
-    而冒烟页和读路径接口（M5）在无库环境也应可用。首次 chat 才付这个成本。
+    为什么不再进程级复用单连接（M6 原实现）：`AIOMySQLSaver.from_conn_string`
+    内部是 `aiomysql.connect()` —— **一根单连接，不是池**。SSE 流被客户端
+    中断（关页面/网络抖动/断线恢复重连）时，正在这条连接上跑的查询被
+    asyncio 取消，aiomysql 把连接标记为死（"Cancelled during execution"），
+    此后**所有** chat 复用这条死连接全部 500，直到重启 —— 2026-09-16 冒烟
+    实测复现。单连接在"不同 session 并发 chat"下还会互相踩（两个查询交织）。
+
+    请求级连接的代价：每次 chat 多一次 TCP 握手（本地 MySQL <1ms，chat
+    本身限流 10/小时，完全可忽略）+ 每请求重建图（纯内存，毫秒级）。
+    连接被打死只影响那一次请求，新请求拿新连接 —— 自愈。
     """
-    state: dict[str, Any] = {"graphs": {}}
+
+    state: dict[str, Any] = {"setup_done": False}
 
     async def factory(session_id: str, model: str | None = None) -> ChatHandle:
-        """`model` = 会话级模型（A45/D55）。图按模型缓存 —— 同一会话每轮拿
-        自己模型的那张图；checkpointer 只建一份，所有模型共享（checkpoint
-        的 key 是 (thread_id=session_id)，与图实例无关）。"""
-        graphs: dict[str, Any] = state["graphs"]
-        key = model or "__default__"
-        if key not in graphs:
-            from langgraph.checkpoint.mysql.aio import AIOMySQLSaver
+        """`model` = 会话级模型（A45/D55）。每请求独立连接 + 独立图实例
+        （checkpoint 的 key 是 thread_id=session_id，与连接/图实例无关）。"""
+        from langgraph.checkpoint.mysql.aio import AIOMySQLSaver
 
-            from app.config import settings
-            from app.graph.graph import build_graph, build_runtime
+        from app.config import settings
+        from app.graph.graph import build_graph, build_runtime
 
-            if "saver_cm" not in state:
-                saver_cm = AIOMySQLSaver.from_conn_string(settings.mysql_dsn_async)
-                saver = await saver_cm.__aenter__()  # 进程生命周期内持有，随进程结束释放
-                await saver.setup()  # 建 checkpoint 四张表（幂等）
-                state["saver_cm"] = saver_cm
-                state["saver"] = saver
-            graphs[key] = build_graph(build_runtime(model=model), checkpointer=state["saver"])
-        return ChatHandle(graphs[key], session_id)
+        saver_cm = AIOMySQLSaver.from_conn_string(settings.mysql_dsn_async)
+        saver = await saver_cm.__aenter__()
+        try:
+            if not state["setup_done"]:
+                await saver.setup()  # 建 checkpoint 四张表（幂等）；建过一次后续连接直接用
+                state["setup_done"] = True
+
+            async def close() -> None:
+                await saver_cm.__aexit__(None, None, None)
+
+            graph = build_graph(build_runtime(model=model), checkpointer=saver)
+            return ChatHandle(graph, session_id, closer=close)
+        except BaseException:
+            await saver_cm.__aexit__(None, None, None)  # 建图半途失败也要还连接
+            raise
 
     return factory
 

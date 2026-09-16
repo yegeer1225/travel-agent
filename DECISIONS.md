@@ -1392,6 +1392,29 @@ saver 是进程级单例 —— **测试里不能用默认 factory**（会真连
 
 ---
 
+### D59 · checkpointer 改请求级连接：进程级单连接会被一次断流打死　`M6` 修复　2026-09-16
+
+> **决定**：`make_default_chat_factory` 从「进程生命周期持有**一根** MySQL 连接」改为
+> **每请求新建 `AIOMySQLSaver`（独立连接）+ 流结束 `aclose()` 归还**。`ChatHandle`
+> 增加 `closer`/`aclose()`；`_sse_body` 的 finally 与路由的 `except BaseException`
+> 两个归还点，正常走完和客户端断开（CancelledError 也走 finally）都必须还。
+>
+> **实测复现的故障**（2026-09-16 冒烟）：`AIOMySQLSaver.from_conn_string` 内部是
+> `aiomysql.connect()` —— 单连接不是池。SSE 流被客户端中断（curl 掐管道模拟
+> 关页面）时，正跑在这条连接上的查询被 asyncio 取消，aiomysql 把连接标记为死
+> （`InterfaceError: Cancelled during execution`），此后**所有** chat 复用死连接
+> 全部 500，直到重启。单连接在"不同 session 并发 chat"下还会互相踩。
+
+| 替代方案 | 否决理由 |
+|---|---|
+| aiomysql 连接池（create_pool） | `langgraph-checkpoint-mysql` 的 `BaseAsyncMySQLSaver` 泛型绑死单 `Connection`（`_cursor()` 直接 `conn.cursor()`），不支持池 —— 除非绕开包自写 saver，复杂度不成比例 |
+| 死连接探活 + 重建（factory 里 ping） | 只救"请求开始时已死"；流中途打死仍要等下一次请求探活，且重建后还得同步重建所有缓存的图 —— 请求级连接从根上消除状态共享，代码反而更简单 |
+
+**代价**：每次 chat 多一次 TCP 握手（本地 <1ms；chat 限流 10/小时，完全可忽略）+ 每请求重建图实例（纯内存毫秒级，原来的图缓存随之删除）。
+**重审触发**：并发 chat 量大到连接建立成本可见时 → 自写池版 saver 或换 PostgreSQL（`langgraph-checkpoint-postgres` 官方支持池）。
+
+---
+
 ## 六、悬而未决（明确没定，别在正文假装定了）
 
 | 项 | 现状 | 什么时候定 | 不定的后果 |

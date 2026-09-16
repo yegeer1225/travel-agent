@@ -148,6 +148,14 @@ async def _sse_body(
             yield _frame(seq, DoneEvent(type="done", session_id=session_id, trip_id=None))
     finally:
         registry.finish(session_id)
+        # D59：请求级 checkpointer 连接 —— 无论正常走完还是客户端断开
+        # （CancelledError 也走 finally），都必须归还连接。
+        closer = getattr(handle, "aclose", None)
+        if closer is not None:
+            try:
+                await closer()
+            except Exception:  # noqa: BLE001 —— 归还失败不影响响应（连接死就死了，下个请求拿新的）
+                pass
 
 
 @router.post("/sessions/{session_id}/chat")
@@ -212,7 +220,14 @@ async def chat(
         )
         return StreamingResponse(stream, media_type="text/event-stream", headers=SSE_HEADERS)
     except BaseException:
+        # StreamingResponse 构造失败时 _sse_body 没机会跑，连接在这里还
         registry.finish(session_id)
+        closer = getattr(handle, "aclose", None)
+        if closer is not None:
+            try:
+                await closer()
+            except Exception:  # noqa: BLE001
+                pass
         raise
 
 

@@ -52,6 +52,10 @@ class FakeHandle:
         self._has_ckpt = has_ckpt
         self.stream_calls: list[dict[str, Any]] = []  # 每次 stream 收到的实参
         self.steer_received: list[str] = []
+        self.close_calls = 0  # D59：路由是否归还了句柄资源
+
+    async def aclose(self) -> None:
+        self.close_calls += 1
 
     async def has_checkpoint(self) -> bool:
         return self._has_ckpt
@@ -206,6 +210,35 @@ def test_stream_end_releases_guard(stores):
     r = client.post(f"/api/sessions/{sid}/chat", json={"message": "去成都"})
     assert r.status_code == 200
     assert not client.app.state.active_chats.is_active(sid), "流结束守卫必须释放，否则会话永久 429"
+
+
+def test_stream_end_closes_handle(stores):
+    """D59：请求级 checkpointer 连接 —— 流走完必须 aclose（恰好一次）。"""
+    handle = FakeHandle(script=[{"event": EV_TOKEN}])
+    client = make_client(handle, stores)
+    sid = new_session(client)
+
+    r = client.post(f"/api/sessions/{sid}/chat", json={"message": "去成都"})
+    assert r.status_code == 200
+    assert handle.close_calls == 1, "正常走完必须归还连接"
+
+
+def test_client_disconnect_still_closes_handle(stores):
+    """D59 核心回归：客户端中途断开（生成器被 close → CancelledError）也必须归还连接。
+
+    复现路径：TestClient 的流式响应不被完整消费 = 模拟 curl 断流。
+    死连接留在进程里曾让之后所有 chat 500（单连接被打死），修复后每次请求
+    拿新连接，但归还纪律仍然必须成立。
+    """
+    handle = FakeHandle(script=[{"event": EV_TOKEN}])
+    client = make_client(handle, stores)
+    sid = new_session(client)
+
+    # stream=True 拿到响应对象但不读 body —— 模拟"连接建立了但客户端跑了"
+    with client.stream("POST", f"/api/sessions/{sid}/chat", json={"message": "去成都"}) as _:
+        pass  # with 退出立即断开，不等流走完
+
+    assert handle.close_calls >= 1, "客户端断开也必须归还连接（D59）"
 
 
 # ══════════════════════════════════════════════════════════════
