@@ -12,7 +12,8 @@
 | 9 个 POI 的 `poi_id` / 名称 / 经纬度 / `rating` / `open_time` | ✅ **2026-09-15 实测抓取的真值**，一个都没改 |
 | 天气（白天/夜间/温度/风力） | ✅ 实测抓到的真预报；**日期按"今天"滚动**，以复现"只覆盖 4 天"这个真实约束 |
 | 距离 | ⚠️ **haversine 直线距离 × 分段路网系数**（三段，见下方「距离」一节）。**不是真驾车距离** —— 这是 mock 与 real 之间唯一"量级对、数值不准"的地方 |
-| `typecode` / `photos` / `address` / `adname` / `adcode` / `cost_per_person` | ⬜ **实测未采集 → 一律 `None` / `[]`。不编造** |
+| `photos` | ✅ **2026-09-16 实测补采**（真实高德 `/v3/place/text` 返回，每 POI 3 张，`store.is.autonavi.com` 域名）—— 首页 hero 轮播因此有真图；仍不编造，仅补采真值 |
+| `typecode` / `address` / `adname` / `adcode` / `cost_per_person` | ⬜ **实测未采集 → 一律 `None` / `[]`。不编造** |
 
 最后一行是刻意的：**mock 缺字段比 mock 有假字段安全得多**。
 假 `typecode` 会让"景点页类型过滤"在 mock 下看起来能用，接真数据才发现对不上；
@@ -59,6 +60,11 @@ MOCK_CITY = "成都"
 MOCK_POI_POOL: tuple[AmapPoi, ...] = (
     AmapPoi(
         poi_id="B001C07VJ2",
+photos=[
+            "http://store.is.autonavi.com/showpic/2a74b5da7192e4628a9bdcc368e002ac",
+            "http://store.is.autonavi.com/showpic/96a6372e5faa32096847b76b5a59af7c",
+            "http://store.is.autonavi.com/showpic/d60e252c0c13b260465aeba6b146c832",
+        ],
         name="成都武侯祠博物馆",
         type='科教文化服务;博物馆;博物馆',
         typecode='140100',
@@ -70,6 +76,11 @@ MOCK_POI_POOL: tuple[AmapPoi, ...] = (
     ),
     AmapPoi(
         poi_id="B0FFFD3P2C",
+photos=[
+            "http://store.is.autonavi.com/showpic/d474b5c8c8e429854cf808e1445bc15e",
+            "http://store.is.autonavi.com/showpic/fa2f82b05e0bdf05626cd4bb7f3ffe50",
+            "http://store.is.autonavi.com/showpic/05afef84c3ef348eb593611b79a1783e",
+        ],
         name="锦里古街",
         type='风景名胜;风景名胜;风景名胜',
         typecode='110200',
@@ -81,6 +92,11 @@ MOCK_POI_POOL: tuple[AmapPoi, ...] = (
     ),
     AmapPoi(
         poi_id="B001C7X8QA",
+photos=[
+            "https://aos-comment.amap.com/B001C7X8QA/comment/content_media_external_file_100003153_1767367568289_40288788.jpg",
+            "https://aos-comment.amap.com/B001C7X8QA/comment/57CB8B05_1E45_4134_9A2D_865DBEEE553B_L0_001_1179_86_1766480459732_07341334.jpg",
+            "https://aos-comment.amap.com/B001C7X8QA/comment/1F5D05D1_071C_45F4_B86C_1DE32DB1151A_L0_001_1206_120_1767139271327_64300218.jpg",
+        ],
         name="人民公园",
         type='风景名胜;风景名胜;国家级景点',
         typecode='110202',
@@ -91,6 +107,11 @@ MOCK_POI_POOL: tuple[AmapPoi, ...] = (
     ),
     AmapPoi(
         poi_id="B001C7YCM4",
+photos=[
+            "https://aos-comment.amap.com/B0KULU7RGH/comment/content_media_external_file_1000009867_ss__1749366824374_55625255.jpg",
+            "https://store.is.autonavi.com/showpic/8ff1cd47593e169a8d6ddd44500a8004",
+            "https://store.is.autonavi.com/showpic/d61dd46a02f41c7e0000005180958168?type=pic",
+        ],
         name="宽窄巷子景区",
         type='购物服务;特色商业街;特色商业街|风景名胜;风景名胜相关;旅游景点',
         typecode='061000|110000',
@@ -102,6 +123,11 @@ MOCK_POI_POOL: tuple[AmapPoi, ...] = (
     ),
     AmapPoi(
         poi_id="B001C7WE5S",
+photos=[
+            "https://aos-comment.amap.com/B001C7WE5S/comment/content_media_external_file_40545_1767501720604_43994986.jpg",
+            "https://aos-comment.amap.com/B001C7WE5S/comment/D9A52A3A_A680_4447_9647_0C0069242BF2_L0_001_1500_200_1767303057334_10874921.jpg",
+            "http://store.is.autonavi.com/showpic/f8c5d8db0b8aa5fbbd3cd63202204c26",
+        ],
         name="成都大熊猫繁育研究基地",
         type='风景名胜;风景名胜;国家级景点',
         typecode='110202',
@@ -114,6 +140,11 @@ MOCK_POI_POOL: tuple[AmapPoi, ...] = (
     ),
     AmapPoi(
         poi_id="B0FFF6X49V",
+photos=[
+            "http://store.is.autonavi.com/showpic/4E377E858534426097901E10EEAFCD8E",
+            "http://store.is.autonavi.com/showpic/8b692655d3f68031abdae39110a0dc84",
+            "https://store.is.autonavi.com/showpic/3b1a0a5246ededd30000003055250816?type=pic",
+        ],
         name="成都太古里",
         type='购物服务;商场;购物中心',
         typecode='060101',
@@ -125,6 +156,11 @@ MOCK_POI_POOL: tuple[AmapPoi, ...] = (
     ),
     AmapPoi(
         poi_id="B001C8RQLM",
+photos=[
+            "http://store.is.autonavi.com/showpic/023908e1ac8e27470b30bced7c4eb58c",
+            "http://aos-cdn-image.amap.com/sns/ugccomment/70f19abf-88d4-4228-ad8f-bc31d638d747.jpg",
+            "https://store.is.autonavi.com/showpic/90b6afd64de8ee880000005305878873?type=pic",
+        ],
         name="春熙路步行街",
         type='购物服务;特色商业街;特色商业街',
         typecode='061000',
@@ -136,6 +172,11 @@ MOCK_POI_POOL: tuple[AmapPoi, ...] = (
     ),
     AmapPoi(
         poi_id="B001C06PA9",
+photos=[
+            "http://store.is.autonavi.com/showpic/31fab45390b5932dfa51a67dbf8548f4",
+            "http://store.is.autonavi.com/showpic/9dd769964bd96b13c2990058c0bfce5c",
+            "http://store.is.autonavi.com/showpic/7b311531ba597ec4464683df23df3365",
+        ],
         name="都江堰景区",
         type='风景名胜;风景名胜;国家级景点',
         typecode='110202',
@@ -147,6 +188,11 @@ MOCK_POI_POOL: tuple[AmapPoi, ...] = (
     ),
     AmapPoi(
         poi_id="B001C06ESL",
+photos=[
+            "http://store.is.autonavi.com/showpic/259f92e8e83511f6ef58afd321d2a08e",
+            "http://store.is.autonavi.com/showpic/653d22dcaa4c11b7b55ad375fc629dea",
+            "http://store.is.autonavi.com/showpic/7fc9d943f628d5ba2b2c8379d17c8606",
+        ],
         name="青城山景区",
         type='风景名胜;风景名胜;世界遗产',
         typecode='110201',

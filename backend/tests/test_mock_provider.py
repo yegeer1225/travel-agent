@@ -310,12 +310,36 @@ def test_mock_pois_declare_unknown_fields_as_none() -> None:
 
     假 `typecode` 会让"景点页类型过滤"在 mock 下看起来能用、接真数据才发现对不上；
     给 `None` 则让那段逻辑现在就走"无数据"分支，问题当场暴露。
+
+    ⚠️ `photos` 曾在本条里（未采集必须空）；2026-09-16 实测补采真值后
+    反转到下面 `test_mock_pois_photos_are_measured`（与 typecode 同一个反转逻辑）。
     """
     assert len(MOCK_POI_POOL) == 9
 
     for poi in MOCK_POI_POOL:
-        assert poi.photos == [], f"{poi.name} 的 photos 不该有值（未采集）"
         assert poi.cost_per_person is None, f"{poi.name} 的 cost 应为 None（人均≠门票）"
+
+
+def test_mock_pois_photos_are_measured() -> None:
+    """`photos` 已**补采真值**（2026-09-16，`/v3/place/text` 按 poi_id 精确匹配）：
+    每个 POI 恰好 3 张、域名必须是高德系真图床 —— hero 轮播的素材来源（A39）。
+
+    🔴 判据用**域名后缀**而不是完整域名白名单：实测图床至少有
+    `store.is.autonavi.com` / `aos-comment.amap.com` / `aos-cdn-image.amap.com`
+    三个并存，高德加一个 CDN 域名就让白名单误报 = 判据反过来咬自己。
+    高德系图床都挂在 `.amap.com` / `.autonavi.com` 下（阿里自有域）。
+
+    反转判据与 typecode 同款：填了值就必须挡住"编造"。
+    """
+    from urllib.parse import urlparse
+
+    for poi in MOCK_POI_POOL:
+        assert len(poi.photos) == 3, f"{poi.name} 应有 3 张实测照片"
+        for url in poi.photos:
+            host = urlparse(url).hostname or ""
+            assert host.endswith((".amap.com", ".autonavi.com")), (
+                f"{poi.name} 的照片域名不对（疑似编造）: {url}"
+            )
 
 
 def test_mock_pois_types_are_measured_not_invented() -> None:
