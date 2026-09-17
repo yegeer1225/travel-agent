@@ -59,6 +59,7 @@ def create_app(
     comment_repo: Any | None = None,
     like_repo: Any | None = None,
     favorite_repo: Any | None = None,
+    spot_repo: Any | None = None,
     limiter: SlidingWindowLimiter | None = None,
     chat_factory: Any | None = None,
 ) -> FastAPI:
@@ -88,6 +89,10 @@ def create_app(
         from app.store.repo import FavoriteRepo
 
         favorite_repo = FavoriteRepo(conn_factory=lambda: connect(settings))
+    if spot_repo is None:
+        from app.store.repo import SpotRepo
+
+        spot_repo = SpotRepo(conn_factory=lambda: connect(settings))
     app.state.session_repo = session_repo
     app.state.trip_repo = trip_repo
     app.state.user_repo = user_repo
@@ -95,6 +100,7 @@ def create_app(
     app.state.comment_repo = comment_repo
     app.state.like_repo = like_repo
     app.state.favorite_repo = favorite_repo
+    app.state.spot_repo = spot_repo
     app.state.limiter = limiter or SlidingWindowLimiter()
 
     # ── 全局兜底限流（D28：300 / 分钟 · IP）──

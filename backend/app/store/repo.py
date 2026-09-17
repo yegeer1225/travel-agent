@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime
@@ -37,10 +37,12 @@ import pymysql.cursors
 from pymysql.err import IntegrityError as MysqlIntegrityError
 
 from app.schemas import (
+    AmapPoi,
     ChatMessage,
     MessageMeta,
     MessageRole,
     Session,
+    SpotCard,
     Trip,
     TripSource,
     TripSummary,
@@ -806,8 +808,8 @@ class FavoriteRecord:
 class FavoriteRepo:
     """`favorites` 表（M9 后半）。
 
-    🔴 `name`/`cover` 是**收藏时刻的快照**：我们没有本地 POI 库（A31 决策），
-    POI 的名字图片只存在于高德侧，取消后再查不到 —— 所以创建时落一份快照，
+    🔴 `name`/`cover` 是**收藏时刻的快照**：收录库（D70）只覆盖**被收录的那部分**
+    POI，行程里出现的地点多数不在其中 → 取消收藏后再查不到名字。所以创建时落一份快照，
     `FavoriteItem.name` 才能不靠二次请求拼出来。
     """
 
@@ -872,6 +874,151 @@ class FavoriteRepo:
         return bool(n)
 
 
+class SpotRepo:
+    """`spots` 收录库（D70）—— **本文件里唯一不带 `user_id` 的 repo**。
+
+    🔴 它是 D31「三重防线」的**明文例外**，理由必须写在这儿，否则下一个人会以为漏写了：
+    D31 的判据不是"所有 repo 都带 user_id"，而是「**这条数据被别人看到算不算越权**」。
+    收录库是**共享只读内容** —— 所有登录用户浏览同一份景点表，这正是设计本身。
+    （对照：`favorites` 也存 name/cover，但那是"某人的收藏"，所以它必须带 user_id。）
+    一句话：**带 user_id 是为了防越权，不是为了整齐。**
+
+    为什么要落库：景点页要搜「**收录的**景点」，而收录 = 把**真实高德返回**存成快照。
+    手写 5 条 INSERT 是编数据，与 D20 删掉参考设计那句"收录 21006 个景点"是同一个错 ——
+    所以**写入路径只有 `scripts/seed_spots.py` 一条**，且它必须走真 provider（real 档）。
+    另一条理由是高德 0.45s/次的出站限速（D35）：搜索页翻页/反复搜在本地是零成本。
+    """
+
+    def __init__(self, conn_factory: ConnectionFactory | None = None) -> None:
+        self._conn_factory = conn_factory or connect
+
+    _COLUMNS = (
+        "poi_id, name, city, district, address, lng, lat, "
+        "cost_per_person, rating, photos, typecode, open_time"
+    )
+
+    @staticmethod
+    def _row_to_card(row: dict[str, Any]) -> SpotCard:
+        photos = row["photos"]
+        if isinstance(photos, str):  # JSON 列经 pymysql 回来是字符串，不自动解析
+            photos = json.loads(photos)
+        cost = row["cost_per_person"]
+        return SpotCard(
+            poi_id=row["poi_id"],
+            name=row["name"],
+            city=row["city"],
+            district=row["district"],
+            address=row["address"],
+            lng=float(row["lng"]),
+            lat=float(row["lat"]),
+            cost_per_person=float(cost) if cost is not None else None,
+            rating=row["rating"],
+            photos=list(photos or []),
+            typecode=row["typecode"],
+        )
+
+    def search(
+        self, keywords: str, *, city: str | None = None, limit: int = 20, offset: int = 0
+    ) -> tuple[list[SpotCard], int]:
+        """按名称 / 别名模糊搜收录库。**排序依据是可解释的两条**：
+
+        1. 名称**前缀**命中优先（`成都博物馆` 搜「成都」排在 `金沙遗址博物馆` 前）
+        2. 评分降序（`rating` 是 VARCHAR，用 `CAST(NULLIF(...))` 转数值 —— 空值 NULL 排最后）
+
+        ⚠️ 这不是"热度排序"（D20 明确拒绝自造指标）：`rating` 是高德真实字段，
+        缺失时排最后而不是当 0 分 —— 那条纪律和 `AmapPoi` 的 `str | [] → None` 一致。
+        """
+        kw = keywords.strip()
+        like = f"%{kw}%"
+        conds = ["(name LIKE %s OR IFNULL(alias, '') LIKE %s)"]
+        params: list[Any] = [like, like]
+        if city:
+            # 用 LIKE 而不是 `=`：高德返回的是「成都市」，前端传的是「成都」
+            conds.append("IFNULL(city, '') LIKE %s")
+            params.append(f"%{city}%")
+        where = " AND ".join(conds)
+
+        with closing(self._conn_factory()) as conn, conn.cursor() as cur:
+            cur.execute(f"SELECT COUNT(*) AS n FROM spots WHERE {where}", params)
+            total = int(cur.fetchone()["n"])
+            cur.execute(
+                f"SELECT {self._COLUMNS} FROM spots WHERE {where} "
+                "ORDER BY (name LIKE %s) DESC, "
+                "CAST(NULLIF(rating, '') AS DECIMAL(4,2)) DESC, name "
+                "LIMIT %s OFFSET %s",
+                [*params, f"{kw}%", limit, offset],
+            )
+            rows = cur.fetchall()
+        return [self._row_to_card(r) for r in rows], total
+
+    def get(self, poi_id: str) -> SpotCard | None:
+        with closing(self._conn_factory()) as conn, conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {self._COLUMNS} FROM spots WHERE poi_id = %s", (poi_id,)
+            )
+            row = cur.fetchone()
+        return self._row_to_card(row) if row else None
+
+    def upsert_many(
+        self, pois: Iterable[AmapPoi], *, source: str = "seed"
+    ) -> tuple[int, int]:
+        """收录（幂等）：返回 `(新增, 更新)`。**只由 seed 脚本调用。**
+
+        写成显式 SELECT + INSERT/UPDATE 而不是 `ON DUPLICATE KEY UPDATE`：
+        后者在 MySQL 8.0.20+ 语法被废弃（`VALUES(col)`），而换成行别名语法
+        又会悄悄要求 8.0.19+。两条查询换来"没有版本假设 + 能报准确的增/改条数"，
+        收录是低频动作，不差这一次往返。
+        """
+        inserted = updated = 0
+        now = utc_now()
+        with closing(self._conn_factory()) as conn, conn.cursor() as cur:
+            for poi in pois:
+                row = (
+                    poi.poi_id,
+                    poi.name,
+                    "|".join(poi.alias or []),
+                    poi.cityname,
+                    poi.adname,
+                    poi.address,
+                    poi.lng,
+                    poi.lat,
+                    poi.cost_per_person,
+                    poi.rating,
+                    json.dumps(list(poi.photos or []), ensure_ascii=False),
+                    poi.typecode,
+                    poi.type,
+                    poi.open_time,
+                    poi.adcode,
+                )
+                cur.execute("SELECT poi_id FROM spots WHERE poi_id = %s", (poi.poi_id,))
+                exists = cur.fetchone() is not None
+                if exists:
+                    cur.execute(
+                        "UPDATE spots SET name=%s, alias=%s, city=%s, district=%s, address=%s, "
+                        "lng=%s, lat=%s, cost_per_person=%s, rating=%s, photos=%s, typecode=%s, "
+                        "type=%s, open_time=%s, adcode=%s, source=%s, updated_at=%s "
+                        "WHERE poi_id=%s",
+                        (*row[1:], source, now, poi.poi_id),
+                    )
+                    updated += 1
+                else:
+                    cur.execute(
+                        "INSERT INTO spots (poi_id, name, alias, city, district, address, lng, lat, "
+                        "cost_per_person, rating, photos, typecode, type, open_time, adcode, "
+                        "source, collected_at, updated_at) "
+                        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+                        "%s, %s, %s)",
+                        (*row, source, now, now),
+                    )
+                    inserted += 1
+        return inserted, updated
+
+    def count(self) -> int:
+        with closing(self._conn_factory()) as conn, conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) AS n FROM spots")
+            return int(cur.fetchone()["n"])
+
+
 __all__ = [
     "SessionRepo",
     "TripRepo",
@@ -884,5 +1031,6 @@ __all__ = [
     "LikeRepo",
     "FavoriteRepo",
     "FavoriteRecord",
+    "SpotRepo",
     "DEFAULT_SESSION_TITLE",
 ]

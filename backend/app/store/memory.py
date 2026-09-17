@@ -16,7 +16,16 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from app.schemas import ChatMessage, MessageMeta, MessageRole, Session, Trip, TripSummaryItem
+from app.schemas import (
+    AmapPoi,
+    ChatMessage,
+    MessageMeta,
+    MessageRole,
+    Session,
+    SpotCard,
+    Trip,
+    TripSummaryItem,
+)
 from app.store.repo import DEFAULT_SESSION_TITLE, DuplicateIdempotencyKeyError, UserRecord
 
 
@@ -453,3 +462,67 @@ class InMemoryFavoriteStore:
 
     def remove(self, user_id: int, target_type: str, target_id: str) -> bool:
         return self._rows.pop((user_id, target_type, target_id), None) is not None
+
+
+class InMemorySpotStore:
+    """`SpotRepo` 的内存替身（D70 收录库）。**排序规则必须与 SQL 版逐条对齐** ——
+    否则测试绿而生产乱序，而乱序**不报错**（只是页面上顺序不对，谁也不会去查）。
+
+    SQL：`ORDER BY (name LIKE 'kw%') DESC, CAST(NULLIF(rating,'') AS DECIMAL) DESC, name`
+    这里：前缀命中优先 → 评分高优先（空评分排最后）→ 名称字典序。
+    """
+
+    def __init__(self, pois: list[AmapPoi] | None = None) -> None:
+        self._rows: dict[str, AmapPoi] = {p.poi_id: p for p in (pois or [])}
+
+    @staticmethod
+    def _rating_key(poi: AmapPoi) -> float:
+        """与 SQL 的 `CAST(NULLIF(rating,'') AS DECIMAL(4,2))` 对齐：
+        **空 / None → 排最后**（-1 表示"没有分"，不是 0 分）；非数字串 MySQL 给 0，这里同样给 0。"""
+        if not poi.rating:
+            return -1.0
+        try:
+            return float(poi.rating)
+        except ValueError:
+            return 0.0
+
+    @staticmethod
+    def _to_card(poi: AmapPoi) -> SpotCard:
+        return SpotCard(
+            poi_id=poi.poi_id, name=poi.name, city=poi.cityname, district=poi.adname,
+            address=poi.address, lng=poi.lng, lat=poi.lat,
+            cost_per_person=poi.cost_per_person, rating=poi.rating,
+            photos=list(poi.photos or []), typecode=poi.typecode,
+        )
+
+    def search(
+        self, keywords: str, *, city: str | None = None, limit: int = 20, offset: int = 0
+    ) -> tuple[list[SpotCard], int]:
+        kw = keywords.strip()
+        rows = [
+            p
+            for p in self._rows.values()
+            if (kw in p.name or any(kw in a for a in (p.alias or [])))
+            and (not city or city in (p.cityname or ""))
+        ]
+        rows.sort(
+            key=lambda p: (0 if p.name.startswith(kw) else 1, -self._rating_key(p), p.name)
+        )
+        return [self._to_card(p) for p in rows[offset : offset + limit]], len(rows)
+
+    def get(self, poi_id: str) -> SpotCard | None:
+        poi = self._rows.get(poi_id)
+        return self._to_card(poi) if poi else None
+
+    def upsert_many(self, pois: Any, *, source: str = "seed") -> tuple[int, int]:
+        inserted = updated = 0
+        for poi in pois:
+            if poi.poi_id in self._rows:
+                updated += 1
+            else:
+                inserted += 1
+            self._rows[poi.poi_id] = poi
+        return inserted, updated
+
+    def count(self) -> int:
+        return len(self._rows)

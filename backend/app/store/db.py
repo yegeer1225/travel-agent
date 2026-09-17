@@ -4,7 +4,8 @@
  为什么是薄 SQL 而不是 ORM
 ═══════════════════════════════════════════════════════════════
 
-这个项目的存储就三张表 + 两个 repo，查询全是"按 user_id 拿列表 / 按 id 拿一条"。
+这个项目的存储全是"按 user_id 拿列表 / 按 id 拿一条"这种形状的查询（`spots` 表除外，
+它是**共享只读内容**，没有归属人 —— 见 `repo.py` 里 `SpotRepo` 的说明）。
 引 SQLAlchemy 换来的是：多一个依赖、多一层会话管理、多一套方言文档要读 ——
 而它防的"手写 SQL 拼错字段"问题，用**查询结果直接喂 Pydantic 模型**这招就挡住了
 （字段名错了 `Session.model_validate` 当场报错，不会静默）。
@@ -145,6 +146,31 @@ _DDL_TABLES: tuple[str, ...] = (
         created_at  DATETIME(6)  NOT NULL,
         PRIMARY KEY (user_id, target_type, target_id),
         KEY idx_favorites_user (user_id, created_at DESC)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS spots (
+        poi_id          VARCHAR(32)  NOT NULL,
+        name            VARCHAR(128) NOT NULL,
+        alias           VARCHAR(255) NULL,
+        city            VARCHAR(64)  NULL,
+        district        VARCHAR(64)  NULL,
+        address         VARCHAR(255) NULL,
+        lng             DOUBLE       NOT NULL,
+        lat             DOUBLE       NOT NULL,
+        cost_per_person DOUBLE       NULL,
+        rating          VARCHAR(16)  NULL,
+        photos          JSON         NULL,
+        typecode        VARCHAR(16)  NULL,
+        type            VARCHAR(128) NULL,
+        open_time       VARCHAR(64)  NULL,
+        adcode          VARCHAR(16)  NULL,
+        source          VARCHAR(16)  NOT NULL DEFAULT 'seed',
+        collected_at    DATETIME(6)  NOT NULL,
+        updated_at      DATETIME(6)  NOT NULL,
+        PRIMARY KEY (poi_id),
+        KEY idx_spots_city (city),
+        KEY idx_spots_name (name)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     """,
 )

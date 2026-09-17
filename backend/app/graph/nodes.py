@@ -84,7 +84,11 @@ from app.schemas import (
     Weather,
 )
 from app.tools.poi_pool import PoiPool, poi_pool_scope
-from app.graph.subagent import drain_subagent_trace, subagent_trace_scope
+from app.graph.subagent import (
+    drain_subagent_trace,
+    keyword_ledger_scope,
+    subagent_trace_scope,
+)
 from app.utils import text_of
 
 # ══════════════════════════════════════════════════════════════
@@ -534,7 +538,16 @@ class Nodes:
         # trace 作用域与池子作用域同层：task 工具（搜索子 agent）执行期间
         # 往里写过程记录，节点结束时 drain 回 state —— 这就是 M4 验收里
         # "主 agent 的 trace 里能看到它调了子 agent"的落点。
-        with poi_pool_scope(pool) as active, subagent_trace_scope():
+        # D71 的搜索关键词台账。**拷一份进来**、跑完写回 ——
+        # 不原地改 state 里那个 list：state 值可能被多跳共享，
+        # 原地改等于在别人不知道的情况下改历史，排查时对不上账。
+        keywords_ledger = list(state.get("searched_keywords") or [])
+
+        with (
+            poi_pool_scope(pool) as active,
+            subagent_trace_scope(),
+            keyword_ledger_scope(keywords_ledger),
+        ):
             for index, call in enumerate(calls):
                 name = str(call.get("name") or "")
                 args = call.get("args") or {}
@@ -588,6 +601,7 @@ class Nodes:
             "tool_call_count": len(calls),
             "collected_pois": snapshot,
             "subagent_trace": sub_trace,  # add reducer → 只追加本次新增，历史由 state 保着
+            "searched_keywords": keywords_ledger,  # D71：覆盖语义（列表本身已累计）
         }
         if errors:
             update["error"] = "工具执行出错：" + "；".join(errors)

@@ -68,6 +68,7 @@ from __future__ import annotations
 
 import contextvars
 import json
+from collections.abc import Iterable
 from contextlib import contextmanager
 from typing import Any, Iterator, TypedDict
 
@@ -93,6 +94,12 @@ MAX_DEDUPE_NAMES = 30
 
 必须截断：池子实测能到几十条，全塞进去会把子代理的输入撑大，
 反而挤掉真正的任务描述（那才是它该看的东西）。"""
+
+MAX_DEDUPE_KEYWORDS = 16
+"""跨 `task` 去重时，拼进任务描述的**已搜关键词**上限（D71）。
+
+比地点名更早截断：关键词没有"可读性"红利（一堆词堆在一起反而像噪音），
+只留最近 N 个就够防"同一个词再搜一遍"。"""
 
 SUB_SYSTEM_PROMPT = """你是搜索规划员。主规划师交给你一个找地点的任务，你来完成搜索并给出精选清单。
 
@@ -186,6 +193,52 @@ def _record_trace(entry: dict[str, Any]) -> None:
     scope = _trace_var.get()
     if scope is not None:
         scope.append(entry)
+
+
+# ══════════════════════════════════════════════════════════════
+#  「已搜过哪些关键词」的传递通道（D71；与 trace 同款：contextvars）
+# ══════════════════════════════════════════════════════════════
+
+_keywords_var: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar(
+    "subagent_searched_keywords", default=None
+)
+
+
+@contextmanager
+def keyword_ledger_scope(ledger: list[str]) -> Iterator[list[str]]:
+    """开一段「已搜关键词」台账作用域。`tool_step` 执行工具前开、结束后写回 state。
+
+    ⚠️ 传进来的是 **state 里那个 list 本身**（不是副本）——
+    所以子 agent 在里面 `append` 之后，`tool_step` 把同一个 list 写回 state
+    就完成了累计。这与池子是同一个套路（`poi_pool_scope(pool)`）：
+    **对象由 state 持有，contextvars 只解决"工具函数够不着 state"这一件事。**
+
+    为什么不像 trace 那样在作用域内新建空列表：trace 是"本次新增"语义（配 `operator.add`），
+    而台账要的是"**从请求开始到现在全部**"—— 每轮都从头开始的话，
+    第二轮派出的 task 就看不见第一轮搜过的词，去重直接失效（这正是要修的东西）。
+    """
+    token = _keywords_var.set(ledger)
+    try:
+        yield ledger
+    finally:
+        _keywords_var.reset(token)
+
+
+def note_searched_keywords(keywords: Iterable[str]) -> None:
+    """记下刚执行的搜索关键词。作用域外是**无操作**
+    （与 `drain_subagent_trace` 同一纪律：「没有作用域」和「作用域是空的」要分开）。"""
+    ledger = _keywords_var.get()
+    if ledger is None:
+        return
+    for keyword in keywords:
+        text = str(keyword).strip()
+        if text and text not in ledger:
+            ledger.append(text)
+
+
+def current_searched_keywords() -> list[str]:
+    """给 `task` 工具读的（拼进新任务描述时用）。没有作用域 → 空列表。"""
+    return list(_keywords_var.get() or [])
 
 
 # ══════════════════════════════════════════════════════════════
@@ -335,10 +388,12 @@ def build_search_subagent(
         keywords = [k for k in (state.get("new_keywords") or []) if k][:2]
         notes = list(state.get("notes", []))
         calls = state.get("search_calls", 0)
+        used: list[str] = []  # 本次**真正执行**的关键词（D71 台账只记它）
 
         for keyword in keywords:
             if calls >= MAX_SUB_SEARCHES:
                 break
+            used.append(keyword)
             try:
                 result = await search_tool.ainvoke({"keyword": keyword, "city": city})
             except Exception as exc:  # noqa: BLE001 —— 单个关键词失败不连坐
@@ -346,6 +401,11 @@ def build_search_subagent(
                 continue
             notes.append(f"## 关键词「{keyword}」\n{result}")
             calls += 1
+
+        # D71：把**真正执行过的**词记进台账。
+        # 只记 `used`（不是 `keywords`）—— 预算撞顶时没跑的那个词不能被记成"搜过了"，
+        # 否则下一个 task 会被提示"别用这个词"，而其实它从来没被搜过。
+        note_searched_keywords(used)
 
         update: SubState = {"notes": notes, "search_calls": calls, "new_keywords": []}
         # 搜索预算用尽就别再回规划节点空转了：LLM 看到同样的结果只会再给
@@ -417,6 +477,25 @@ def _already_found_hint() -> str:
     return "、".join(p.name for p in pool.all()[:MAX_DEDUPE_NAMES])
 
 
+def _searched_keyword_hint() -> str:
+    """把「已经搜过的关键词」拼成一句「别重复」的提示（D71）。
+
+    ⚠️ **与 D65 的地点名是两件事，不能互相替代**：
+    - 地点名回答"哪些**结果**已经有了" → 防止新 task 再推荐同一批地点
+    - 关键词回答"哪些**问法**已经用过了" → 防止新 task 把同一个词再搜一遍
+
+    实测（2026-09-17 成都那轮）：task1 点名举例「杜甫草堂 / 武侯祠 / 锦里」，
+    task3 又列同一批、task4 第三次提到「锦里」—— **地点名提示拦不住它**，
+    因为"再确认一次开放时间"在模型看来是另一件事，而不是重复推荐。
+    """
+    used = current_searched_keywords()
+    if not used:
+        return ""
+    shown = used[-MAX_DEDUPE_KEYWORDS:]
+    prefix = "（只列最近若干个）" if len(used) > len(shown) else ""
+    return f"{'、'.join(shown)}{prefix}"
+
+
 def build_task_tool(
     *,
     subgraph: CompiledStateGraph,
@@ -459,6 +538,13 @@ def build_task_tool(
         if found:
             brief = f"{brief}\n\n⚠️ 这些地点前面已经搜到过，不要重复推荐：{found}"
 
+        # ── D71：把「已经搜过的关键词」也拼进去 ──
+        # D65 只传"结果"，拦不住"同一个词换个说法再搜一遍"（实测 task1/3/4 三次
+        # 覆盖同一批地点）。这里补上"过程"，两句提示各管一头。
+        used = _searched_keyword_hint()
+        if used:
+            brief = f"{brief}\n\n⚠️ 这些关键词前面已经搜过，不要再搜一遍：{used}"
+
         result = await subgraph.ainvoke(
             {
                 "objective": brief,
@@ -478,8 +564,13 @@ def build_task_tool(
 __all__ = [
     "MAX_SUB_ROUNDS",
     "MAX_SUB_SEARCHES",
+    "MAX_DEDUPE_NAMES",
+    "MAX_DEDUPE_KEYWORDS",
     "build_search_subagent",
     "build_task_tool",
+    "current_searched_keywords",
     "drain_subagent_trace",
+    "keyword_ledger_scope",
+    "note_searched_keywords",
     "subagent_trace_scope",
 ]

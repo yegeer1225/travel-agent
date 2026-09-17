@@ -745,8 +745,17 @@ class SpotSearchResponse(BaseModel):
 
     items: list[SpotCard] = Field(default_factory=list)
     total: int = Field(default=0, ge=0)
-    source: Literal["amap", "mock"] = "amap"
-    cached: bool = False  # 命中进程内缓存（高德 QPS 限流，缓存是刚需不是优化）
+    source: Literal["amap", "mock", "local"] = "local"
+    """数据来源。**`GET /spots/search` 现在恒为 `local`**（收录库，D70）——
+    景点页的语义是"搜本站收录的景点"，所以**没有回落**：收录库里没有就是空列表，
+    不静默换成高德实时结果（那会让同一页混两种来源，D34 的"不静默换源"同理）。
+
+    `amap` / `mock` 保留在枚举里给**详情的回落路径**用（见 `GET /spots/{poi_id}`），
+    前端按值分支、**不要假设只有一个取值**。"""
+
+    cached: bool = False
+    """命中进程内缓存。⚠️ `source="local"` 时**恒 false** —— 本地查询毫秒级，
+    原来的进程内缓存只为省高德配额（D35 的 0.45s 出站限速），本地路径不需要它。"""
 
 
 class HeroSlide(BaseModel):

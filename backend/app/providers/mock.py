@@ -13,7 +13,8 @@
 | 天气（白天/夜间/温度/风力） | ✅ 实测抓到的真预报；**日期按"今天"滚动**，以复现"只覆盖 4 天"这个真实约束 |
 | 距离 | ⚠️ **haversine 直线距离 × 分段路网系数**（三段，见下方「距离」一节）。**不是真驾车距离** —— 这是 mock 与 real 之间唯一"量级对、数值不准"的地方 |
 | `photos` | ✅ **2026-09-16 实测补采**（真实高德 `/v3/place/text` 返回，每 POI 3 张，`store.is.autonavi.com` 域名）—— 首页 hero 轮播因此有真图；仍不编造，仅补采真值 |
-| `typecode` / `address` / `adname` / `adcode` / `cost_per_person` | ⬜ **实测未采集 → 一律 `None` / `[]`。不编造** |
+| `type` / `typecode` | ✅ **2026-09-15 实测补采**（`probe_amap.py --collect-mock`，按 `poi_id` 精确匹配）—— `validate.py` 的 `weather_conflict` 判据靠 `type` 区分室内/户外，缺了它那条判据在 mock 下永远走不到 |
+| `address` / `adname` / `adcode` / `cost_per_person` | ⬜ **实测未采集 → 一律 `None` / `[]`。不编造** |
 
 最后一行是刻意的：**mock 缺字段比 mock 有假字段安全得多**。
 假 `typecode` 会让"景点页类型过滤"在 mock 下看起来能用，接真数据才发现对不上；

@@ -35,7 +35,10 @@ from app.graph.subagent import (
     MAX_SUB_SEARCHES,
     build_search_subagent,
     build_task_tool,
+    current_searched_keywords,
     drain_subagent_trace,
+    keyword_ledger_scope,
+    note_searched_keywords,
     subagent_trace_scope,
 )
 from app.providers.mock import MOCK_CITY, MOCK_POI_POOL, MockAmapProvider
@@ -357,6 +360,78 @@ def test_task_tool_defaults_city_to_destination():
         run(task.ainvoke({"objective": "历史古迹"}))
 
     assert "成都" in sub_llm.joined_prompts(), "默认城市要进子 agent 的任务描述"
+
+
+# ══════════════════════════════════════════════════════════════
+#  D71：已搜关键词台账（跨 task 去重里"过程"那一半）
+# ══════════════════════════════════════════════════════════════
+
+
+def test_keyword_ledger_collects_executed_keywords():
+    """子 agent 真正搜过的词要落进台账 —— 它是"同一个词别搜第二遍"的唯一依据。
+
+    D65 只传"结果"（池子里有哪些地点），拦不住"换个说法问同一批地点"：
+    实测成都在一轮里 task1/task3/task4 三次覆盖「杜甫草堂 / 武侯祠 / 锦里」。
+    """
+    ledger: list[str] = []
+    with poi_pool_scope(PoiPool()), keyword_ledger_scope(ledger):
+        _run_sub(sub_finds("武侯祠", "锦里", picks=[]))
+    assert ledger == ["武侯祠", "锦里"]
+
+
+def test_keyword_ledger_only_records_executed_keywords():
+    """🔴 预算撞顶时**没跑的那个词不许记**：把"没搜过"记成"搜过了"是**不可逆**的
+    信息错误 —— 下一个 task 会被提示"别用这个词"，而它其实从来没被搜过。
+
+    （反过来"搜过了却没记"只是少省一点，无副作用 —— 所以这里宁可漏记不误记。）
+    """
+    ledger: list[str] = []
+    subgraph = build_search_subagent(
+        llm=ScriptedChatModel(script=sub_finds("武侯祠", "锦里", picks=[])),
+        search_tool=_search_tool(),
+    )
+    initial = {
+        "objective": "成都适合带老人慢走的景点",
+        "city": "成都",
+        "notes": [],
+        "keywords": [],
+        "new_keywords": [],
+        "search_calls": MAX_SUB_SEARCHES - 1,  # 只够跑一个词
+        "rounds": 0,
+    }
+    with poi_pool_scope(PoiPool()), keyword_ledger_scope(ledger):
+        run(subgraph.ainvoke(initial))
+
+    assert ledger == ["武侯祠"], "第二个词没执行，不许进台账"
+
+
+def test_keyword_ledger_dedupes_and_survives_multiple_tasks():
+    """台账是**累计 + 去重**的：第二个 task 里重复的词不会再记一遍。"""
+    ledger: list[str] = []
+    with poi_pool_scope(PoiPool()), keyword_ledger_scope(ledger):
+        _run_sub(sub_finds("武侯祠", picks=[]))
+        _run_sub(sub_finds("武侯祠", "锦里", picks=[]))
+    assert ledger == ["武侯祠", "锦里"]
+
+
+def test_keyword_ledger_outside_scope_is_noop():
+    """作用域外调用是**无操作**（与 trace 同一纪律：没有作用域 ≠ 作用域是空的）。"""
+    note_searched_keywords(["随便一个词"])
+    assert current_searched_keywords() == []
+
+
+def test_task_tool_puts_searched_keywords_into_objective():
+    """新 task 的描述里要带上"这些词搜过了" —— 这就是 D71 的落点。"""
+    sub_llm = ScriptedChatModel(script=sub_finds("武侯祠", picks=[]))
+    subgraph = build_search_subagent(llm=sub_llm, search_tool=_search_tool())
+    task = build_task_tool(subgraph=subgraph, default_city="成都")
+
+    with poi_pool_scope(PoiPool()), keyword_ledger_scope(["成都 博物馆", "成都 火锅"]):
+        run(task.ainvoke({"objective": "成都适合带老人的餐厅"}))
+
+    prompt = sub_llm.joined_prompts()
+    assert "这些关键词前面已经搜过" in prompt
+    assert "成都 博物馆" in prompt and "成都 火锅" in prompt
 
 
 # ══════════════════════════════════════════════════════════════

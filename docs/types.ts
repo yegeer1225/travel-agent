@@ -364,7 +364,7 @@ export interface AmapImportResponse {
 export interface SpotSearchResponse {
   items: SpotCard[]
   total: number
-  source: "amap" | "mock"
+  source: "amap" | "mock" | "local"
   cached: boolean
 }
 

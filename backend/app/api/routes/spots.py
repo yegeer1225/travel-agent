@@ -1,36 +1,45 @@
-"""景点搜索接口（M4 契约、M9 后半实现）：`GET /spots/search`。
+"""景点接口：`GET /spots/search` + `GET /spots/{poi_id}`。
 
-🔴 三条契约（api.md 3.5）：
+═══════════════════════════════════════════════════════════════
+ 2026-09-17 语义变更（D70）：景点页搜的是**本站收录库**，不再代理高德
+═══════════════════════════════════════════════════════════════
+
+| 接口 | 数据来源 |
+|---|---|
+| `GET /spots/search` | **只有收录库**（`spots` 表）。收录库里没有 → 空列表，**不回落**（D70） |
+| `GET /spots/{poi_id}` | **收录库优先 → 回落 provider → 都没有 404** |
+
+**为什么 search 不回落**：景点页的语义是"搜本站收录的景点"。回落会把同一页混成
+两种来源（要前端解释"这条为什么来自高德"），且把"库里确实没有"这条真实路径掩盖掉 ——
+和 D67「池空要分因」一个道理。
+
+**为什么 detail 要回落**：它是"按 id 拿一条"，不是"搜索"。行程卡片、收藏、攻略里的
+`poi_id` 可能指向**不在收录库**的地点（那些是高德侧的 id），此时 404 会显得像 bug。
+
+三条契约（api.md 3.5）：
 - `keywords` 为空 → 400 `keyword_required`（前端空关键词时根本不该发请求）
-- 响应带 `source`（amap/mock）与 `cached`（命中进程内缓存）
-- 高德 QPS 限流的串行 + 退避在 provider 层做（D35），**这里再叠一层进程内缓存**
-  —— 搜索页翻页/重复搜索不该反复烧高德配额。
-
-限流 120/分钟·用户（D28）：limiter 实例挂在 app.state 上，不能做成模块级
-router dependency —— 所以在路由体内手动查（与 chat 的手动限流同一模式）。
+- 响应带 `source`（search 恒 `local`）与 `cached`（本地路径恒 `false`）
+- 限流 120/分钟·用户（D28）**保留**：它原来守的是高德配额，现在守的是库
+  （便宜不等于可以无限刷，且改阈值是另一条决策，不夹带在这次变更里）
 """
 
 from __future__ import annotations
 
-import time
-
 from fastapi import APIRouter, Depends, Query, Request
 
-from app.api.deps import get_current_user_id, get_limiter, get_nodes
+from app.api.deps import get_current_user_id, get_limiter, get_nodes, get_spot_repo
 from app.api.errors import AppError, RateLimited
 from app.api.ratelimit import SPOT_SEARCH_PER_MIN
 from app.schemas import SpotCard, SpotSearchResponse
 
 router = APIRouter(tags=["spots"])
 
-_CACHE_TTL_SECONDS = 300.0
-# key=(keywords, city) → (monotonic 时间, POI 列表)。进程内缓存：重启即失效，够用。
-# ⚠️ 只按 (keywords, city) 缓存**整批**（最多 50 条），分页在内存里切 —— 高德配额最省。
-_cache: dict[tuple[str, str], tuple[float, list]] = {}
-
 
 def _to_spot_card(poi) -> SpotCard:
-    """AmapPoi → SpotCard（对外精简卡，全量透传会把内部结构变成对外契约）。"""
+    """AmapPoi → SpotCard（对外精简卡，全量透传会把内部结构变成对外契约）。
+
+    只在**详情回落 provider** 那条路上用到 —— 搜索走收录库，store 层直接返回 SpotCard。
+    """
     return SpotCard(
         poi_id=poi.poi_id,
         name=poi.name,
@@ -64,27 +73,8 @@ async def search_spots(
     if not kw:
         raise AppError("keyword_required", "请输入搜索关键词", 400)
 
-    nodes = get_nodes(request)  # 懒建运行时；provider 按 settings 的 mock/real 路由
-    provider = nodes.provider
-
-    cache_key = (kw, city or "")
-    now = time.monotonic()
-    cached = False
-    hit = _cache.get(cache_key)
-    if hit is not None and now - hit[0] < _CACHE_TTL_SECONDS:
-        cached = True
-        all_pois = hit[1]
-    else:
-        all_pois = await provider.search_poi(kw, city=city, limit=50)
-        _cache[cache_key] = (now, all_pois)
-
-    page = all_pois[offset : offset + limit]
-    return SpotSearchResponse(
-        items=[_to_spot_card(p) for p in page],
-        total=offset + len(all_pois),
-        source="mock" if getattr(provider, "name", "real") == "mock" else "amap",
-        cached=cached,
-    )
+    items, total = get_spot_repo(request).search(kw, city=city, limit=limit, offset=offset)
+    return SpotSearchResponse(items=items, total=total, source="local", cached=False)
 
 
 @router.get("/spots/{poi_id}", response_model=SpotCard)
@@ -93,9 +83,12 @@ async def get_spot(
     poi_id: str,
     user_id: int = Depends(get_current_user_id),
 ) -> SpotCard:
-    """POI 详情（M8 契约）。查不到 = 404（`not_found`，与全局 404 语义一致）。"""
-    provider = get_nodes(request).provider
-    poi = await provider.get_poi(poi_id)
+    """收录库优先 → provider 回落 → 404（`not_found`，与全局 404 语义一致）。"""
+    card = get_spot_repo(request).get(poi_id)
+    if card is not None:
+        return card
+
+    poi = await get_nodes(request).provider.get_poi(poi_id)
     if poi is None:
         raise AppError("not_found", "景点不存在", 404)
     return _to_spot_card(poi)

@@ -85,6 +85,12 @@ def get_favorite_repo(request: Request):
     return request.app.state.favorite_repo
 
 
+def get_spot_repo(request: Request):
+    """收录库（D70）。`spots` 是**共享只读内容**，所以这个 repo 不带 user_id
+    （D31 的明文例外，判据见 `repo.py` 里 `SpotRepo` 的说明）。"""
+    return request.app.state.spot_repo
+
+
 __all__ = [
     "get_current_user_id",
     "get_nodes",
@@ -95,5 +101,6 @@ __all__ = [
     "get_comment_repo",
     "get_like_repo",
     "get_favorite_repo",
+    "get_spot_repo",
     "get_limiter",
 ]

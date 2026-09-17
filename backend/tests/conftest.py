@@ -21,6 +21,7 @@ from app.store.memory import (
     InMemoryGuideStore,
     InMemoryLikeStore,
     InMemorySessionStore,
+    InMemorySpotStore,
     InMemoryTripStore,
     InMemoryUserStore,
 )
@@ -74,6 +75,8 @@ def client(stores, user_store, social_stores) -> TestClient:
         comment_repo=social_stores["comments"],
         like_repo=social_stores["likes"],
         favorite_repo=social_stores["favorites"],
+        # 收录库默认空（D70）—— 不传就走 MySQL SpotRepo，而 tests 不连库
+        spot_repo=InMemorySpotStore(),
         limiter=SlidingWindowLimiter(),
     )
     return _apply_auth(TestClient(app))

@@ -95,6 +95,19 @@ class TripState(TypedDict, total=False):
     collected_weather: dict[str, dict[str, Any]]
     """日期 → 天气 dump。同样为了恢复。"""
 
+    searched_keywords: list[str]
+    """已派出去搜过的**关键词**（D71），累计、去重，无 reducer（覆盖语义）。
+
+    为什么要有它：子 agent 每次 `task` 调用都是一份全新状态（D5 已接受），
+    所以「**谁搜过什么词**」在子 agent 之间根本不存在 —— 实测表现为同一个词
+    被两个 task 各搜一遍（高德配额 + 子 agent 的 LLM 往返都被白花）。
+    `collected_pois` 只能告诉新 task "哪些**地点**已经有了"，**回答不了"哪个词已经搜过"**。
+
+    ⚠️ 它**只用来拼进新 task 的描述**（提示级去重，与 D65 同款），
+    **不是硬闸门** —— 硬拦会让"同一个词换个意图再搜"（比如先搜景点、后搜餐厅，
+    都叫「成都」）变成不可能。这是刻意的：**去重的目标是省重复动作，不是禁止搜索。**
+    """
+
     subagent_trace: Annotated[list[Any], operator.add]
     """每次 `task`（搜索子 agent）调用的过程记录，`tool_step` 只返回**本次新增**。
 

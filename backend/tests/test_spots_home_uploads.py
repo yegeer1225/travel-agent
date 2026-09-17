@@ -1,6 +1,10 @@
 """M9 后半其余接口测试：spots/search、/home、/uploads/avatar、amap-import。
 
-provider 用 fake（SpotSearchResponse.source 断言 mock 路由）；
+🔴 **2026-09-17 起 `/spots/search` 走收录库（D70）**，provider 只在两处还会被碰到：
+`/home` 的 Hero/推荐，以及**详情回落**（`GET /spots/{poi_id}` 收录库查不到时）。
+本文件故意让**收录库（B1/B2）与 provider（B1~B6）是两个不同的集合** ——
+否则"搜不到不回落"这条语义根本测不出来（用同一个集合，回落与不回落结果一样）。
+
 上传产物在 teardown 里清掉（Cleanup 铁律）。
 """
 
@@ -41,8 +45,11 @@ class FakeProvider:
 
     def __init__(self, pois: list[AmapPoi]) -> None:
         self.pois = pois
+        self.search_log: list[str] = []
+        """记录 provider 被搜过哪些词 —— 用来断言**本地路径零出站**（D70）。"""
 
     async def search_poi(self, keyword: str, city: str | None = None, limit: int = 10):
+        self.search_log.append(keyword)
         hits = [p for p in self.pois if keyword in p.name or keyword in p.alias]
         return hits[:limit]
 
@@ -66,8 +73,24 @@ def _poi(pid: str, name: str, alias: list[str] | None = None, photos: list[str] 
 
 @pytest.fixture
 def api(monkeypatch):
-    """干净的 app + fake provider + uid=1 已登录。"""
+    """干净的 app + 收录库（B1/B2）+ fake provider（B1~B6）+ uid=1 已登录。
+
+    **两个集合故意不同**：收录库只有 B1/B2，provider 有 B1~B6。
+    `client.fake_provider` 让用例能断言"本地路径没碰 provider"（D70）。
+    """
     from types import SimpleNamespace
+
+    from app.store.memory import InMemorySpotStore
+
+    provider_pois = [
+        _poi("B1", "宽窄巷子景区", ["宽窄巷子", "少城"], ["https://img/1.jpg"]),
+        _poi("B2", "成都武侯祠博物馆", ["武侯祠"], ["https://img/2.jpg"]),
+        _poi("B3", "成都大熊猫繁育研究基地", ["大熊猫基地"], ["https://img/3.jpg"]),
+        _poi("B4", "人民公园", ["人民公园"], ["https://img/4.jpg"]),
+        _poi("B5", "锦里古街", ["锦里"]),
+        _poi("B6", "成都太古里", ["太古里"]),
+    ]
+    provider = FakeProvider(provider_pois)
 
     app = create_app(
         session_repo=InMemorySessionStore(),
@@ -77,28 +100,19 @@ def api(monkeypatch):
         comment_repo=InMemoryCommentStore(),
         like_repo=InMemoryLikeStore(),
         favorite_repo=InMemoryFavoriteStore(),
+        # 收录库只放前两条 —— B3~B6 只在 provider 里，用于验证"不回落"与"详情回落"
+        spot_repo=InMemorySpotStore(provider_pois[:2]),
         limiter=SlidingWindowLimiter(),
-    )
-    provider = FakeProvider(
-        [
-            _poi("B1", "宽窄巷子景区", ["宽窄巷子"], ["https://img/1.jpg"]),
-            _poi("B2", "成都武侯祠博物馆", ["武侯祠"], ["https://img/2.jpg"]),
-            _poi("B3", "成都大熊猫繁育研究基地", ["大熊猫基地"], ["https://img/3.jpg"]),
-            _poi("B4", "人民公园", ["人民公园"], ["https://img/4.jpg"]),
-            _poi("B5", "锦里古街", ["锦里"]),
-            _poi("B6", "成都太古里", ["太古里"]),
-        ]
     )
     app.state.nodes = SimpleNamespace(provider=provider)
     client = TestClient(app)
     client.headers.update(auth_header(user_id=1))
-    # 模块级缓存逐测试清零（进程内缓存会串测试）
-    from app.api.routes import home as home_mod, spots as spots_mod
+    client.fake_provider = provider
 
-    spots_mod._cache.clear()
+    from app.api.routes import home as home_mod
+
     monkeypatch.setattr(home_mod, "_home_cache", None)
     yield client
-    spots_mod._cache.clear()
     monkeypatch.setattr(home_mod, "_home_cache", None)
 
 
@@ -115,20 +129,45 @@ def test_search_maps_to_spot_card(api):
     r = api.get("/api/spots/search", params={"keywords": "宽窄巷子"})
     assert r.status_code == 200, r.text
     data = r.json()
-    assert data["source"] == "mock"
-    assert data["cached"] is False
+    assert data["source"] == "local"
+    assert data["cached"] is False  # 本地路径没有缓存层（D70）
+    assert data["total"] == 1
     card = data["items"][0]
     assert card["poi_id"] == "B1"
     assert card["lng"] == 104.05 and card["lat"] == 30.64
     assert card["rating"] == "4.8"
-    # 别名也能命中（模糊匹配与封闭世界校验同一套习惯）
-    assert api.get("/api/spots/search", params={"keywords": "太古里"}).json()["items"][0]["poi_id"] == "B6"
+    assert card["photos"] == ["https://img/1.jpg"]
 
 
-def test_search_cache_flag(api):
-    api.get("/api/spots/search", params={"keywords": "宽窄巷子"})
-    r = api.get("/api/spots/search", params={"keywords": "宽窄巷子"})
-    assert r.json()["cached"] is True
+def test_search_hits_alias(api):
+    """只出现在别名里的词也要命中（收录库把 alias 存下来就是为了这个）。"""
+    r = api.get("/api/spots/search", params={"keywords": "少城"})
+    assert r.json()["items"][0]["poi_id"] == "B1"
+
+
+def test_search_local_miss_does_not_fall_back(api):
+    """🔴 D70 的核心语义：收录库里没有 → **空列表**，不静默换成高德/mock 的实时结果。
+
+    「太古里」只在 provider 里（B6）。如果这里返回了 B6，说明有人在 search 里加了回落 ——
+    那会让同一页混两种来源，并把"库里确实没有"这条真实路径掩盖掉（D67 同理）。
+    """
+    r = api.get("/api/spots/search", params={"keywords": "太古里"})
+    assert r.status_code == 200
+    assert r.json() == {"items": [], "total": 0, "source": "local", "cached": False}
+    assert api.fake_provider.search_log == [], "本地搜索不该碰 provider（零出站）"
+
+
+def test_search_paging_and_city_filter(api):
+    assert api.get("/api/spots/search", params={"keywords": "成都"}).json()["total"] == 1  # 武侯祠
+    # city 用 LIKE 匹配：库里存「成都」、传「成都」命中
+    assert api.get(
+        "/api/spots/search", params={"keywords": "成都", "city": "成都"}
+    ).json()["total"] == 1
+    # 换一个城市 → 0 条（不是报错）
+    assert api.get(
+        "/api/spots/search", params={"keywords": "成都", "city": "杭州"}
+    ).json()["items"] == []
+    assert api.get("/api/spots/search", params={"keywords": "成都", "limit": 1}).json()["total"] == 1
 
 
 def test_search_requires_auth(api):
@@ -139,13 +178,21 @@ def test_search_requires_auth(api):
 # ── /spots/{poi_id} ────────────────────────────────────────
 
 
-def test_get_spot_by_id(api):
+def test_get_spot_by_id_from_library(api):
     r = api.get("/api/spots/B1")
     assert r.status_code == 200
     card = r.json()
     assert card["poi_id"] == "B1" and card["name"] == "宽窄巷子景区"
     assert card["lng"] == 104.05  # SpotCard 精简卡，不含 open_time 等内部字段
     assert "open_time" not in card
+
+
+def test_get_spot_falls_back_to_provider(api):
+    """收录库没有、但 provider 有 → 200（**详情回落**，与 search 的"不回落"是两回事：
+    这是"按 id 拿一条"，行程/收藏里的 poi_id 可能指向未收录的地点）。"""
+    r = api.get("/api/spots/B6")
+    assert r.status_code == 200
+    assert r.json()["name"] == "成都太古里"
 
 
 def test_get_spot_unknown_404(api):

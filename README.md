@@ -107,7 +107,21 @@ cd backend && ../.venv/Scripts/python -m uvicorn app.api.main:app --reload
 
 # 4) 前端（另开一个终端）
 cd frontend && npm install && npm run dev                 # http://localhost:5173
+
+# 5) 收录景点（**必做**，否则「旅游景点」页永远是空的）
+cd backend && ../.venv/Scripts/python scripts/seed_spots.py \
+    --city 成都 --keywords "宽窄巷子,武侯祠,杜甫草堂,锦里,大熊猫繁育研究基地"
 ```
+
+**为什么要第 5 步**：景点页搜的是**本站收录库**（`spots` 表），不是高德实时接口（D70）。
+收录库是**真实高德 POI 的快照**，只能由这个脚本写入 —— **不手写、不编**（手写就是假数据）。
+没跑过它，`/spots` 搜什么都返回空。收录过一次就长期有效（幂等，重跑即刷新）。
+
+| 收录命令 | 作用 |
+|---|---|
+| `python scripts/seed_spots.py --city 成都 --keywords "..."` | 收录（每个关键词取 1 条，`--top N` 可调） |
+| `python scripts/seed_spots.py --dry-run ...` | 只看会收什么，**不落库** |
+| `python scripts/seed_spots.py --list` | 看当前收录了什么（含采集时间） |
 
 两个 Key 说明：
 
