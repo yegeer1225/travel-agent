@@ -27,6 +27,17 @@ import type {
   UserOut,
   UpdateProfileRequest,
   AvatarUploadResponse,
+  AmapImportResponse,
+  GuideListItem,
+  GuideDetail,
+  GuideUpsertRequest,
+  CommentItem,
+  CommentCreateRequest,
+  LikeToggleRequest,
+  LikeState,
+  FavoriteCreateRequest,
+  FavoriteItem,
+  TargetType,
 } from '../types/contract'
 import { handleUnauthorized, getToken } from './auth'
 
@@ -174,4 +185,104 @@ export function searchSpots(
   const params = new URLSearchParams({ keywords, limit: String(limit), offset: String(offset) })
   if (city) params.set('city', city)
   return request<SpotSearchResponse>(`/spots/search?${params.toString()}`)
+}
+
+// ── 行程：高德 APP 唤端（M7 🔵）──────────────────────────
+export function importToAmap(tripId: string): Promise<AmapImportResponse> {
+  return post<AmapImportResponse>(`/trips/${tripId}/amap-import`, {})
+}
+
+// ── 攻略社区 / 互动（M10 + M11，api.md 2.6）───────────────
+export interface GuideListParams {
+  city?: string
+  keywords?: string
+  /** '1' 只看自己的全部（要 token）；省略 = 只看 public */
+  mine?: '1'
+  /** 只查"在这条行程下发过的"攻略（发布前确认框判据，隐含只看自己） */
+  source_trip_id?: string
+}
+
+export function listGuides(params: GuideListParams = {}): Promise<Page<GuideListItem>> {
+  const q = new URLSearchParams()
+  if (params.city) q.set('city', params.city)
+  if (params.keywords) q.set('keywords', params.keywords)
+  if (params.mine) q.set('mine', params.mine)
+  if (params.source_trip_id) q.set('source_trip_id', params.source_trip_id)
+  const s = q.toString()
+  return request<Page<GuideListItem>>(`/guides${s ? `?${s}` : ''}`)
+}
+
+/** 行程 → 攻略（M12）：正文由后端从行程渲染。Idempotency-Key 必须在 click handler 内生成一次，重试沿用 */
+export function publishAsGuide(
+  tripId: string,
+  idempotencyKey: string,
+  body: { title?: string | null; destination?: string | null } = {},
+): Promise<GuideDetail> {
+  return request<GuideDetail>(`/trips/${tripId}/publish-as-guide`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify(body),
+  })
+}
+
+export function getGuide(id: string): Promise<GuideDetail> {
+  return request<GuideDetail>(`/guides/${id}`)
+}
+
+/** 创建攻略（默认 private） */
+export function createGuide(body: GuideUpsertRequest): Promise<GuideDetail> {
+  return post<GuideDetail>('/guides', body)
+}
+
+export function patchGuide(id: string, body: GuideUpsertRequest): Promise<GuideDetail> {
+  return request<GuideDetail>(`/guides/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
+}
+
+export function publishGuide(id: string): Promise<GuideDetail> {
+  return post<GuideDetail>(`/guides/${id}/publish`, {})
+}
+
+export function unpublishGuide(id: string): Promise<GuideDetail> {
+  return post<GuideDetail>(`/guides/${id}/unpublish`, {})
+}
+
+export function deleteGuide(id: string): Promise<void> {
+  return request<void>(`/guides/${id}`, { method: 'DELETE' })
+}
+
+export function listComments(guideId: string): Promise<Page<CommentItem>> {
+  return request<Page<CommentItem>>(`/guides/${guideId}/comments`)
+}
+
+export function createComment(guideId: string, content: string): Promise<CommentItem> {
+  return post<CommentItem>(`/guides/${guideId}/comments`, { content } satisfies CommentCreateRequest)
+}
+
+export function deleteComment(id: string): Promise<void> {
+  return request<void>(`/comments/${id}`, { method: 'DELETE' })
+}
+
+/** 点赞/取消二合一，返回最终状态，前端直接用，不要本地猜 */
+export function toggleLike(req: LikeToggleRequest): Promise<LikeState> {
+  return post<LikeState>('/likes/toggle', req)
+}
+
+export function getLikeState(target_type: TargetType, target_id: string): Promise<LikeState> {
+  const q = new URLSearchParams({ target_type, target_id })
+  return request<LikeState>(`/likes?${q.toString()}`)
+}
+
+// ── 收藏（M9，api.md 2.6）───────────────────────────────
+export function listFavorites(target_type?: TargetType): Promise<Page<FavoriteItem>> {
+  const q = target_type ? `?target_type=${target_type}` : ''
+  return request<Page<FavoriteItem>>(`/favorites${q}`)
+}
+
+/** 收 poi 必传 name（当前 SpotCard 快照）；收 guide/comment 别传 name（后端自己取） */
+export function addFavorite(req: FavoriteCreateRequest): Promise<FavoriteItem> {
+  return post<FavoriteItem>('/favorites', req)
+}
+
+export function deleteFavorite(target_type: TargetType, target_id: string): Promise<void> {
+  return request<void>(`/favorites/${target_type}/${target_id}`, { method: 'DELETE' })
 }

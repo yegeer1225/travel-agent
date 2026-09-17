@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, Link } from 'react-router-dom'
 import type {
   Trip,
   TripOp,
@@ -7,14 +7,16 @@ import type {
   CheckEvent,
   SSEEvent,
   RecheckResponse,
+  GuideListItem,
 } from '../types/contract'
-import { ApiError, getTrip, listTrips, patchTrip, recheckTrip } from '../lib/api'
+import { ApiError, getTrip, listGuides, listTrips, patchTrip, publishAsGuide, recheckTrip } from '../lib/api'
 import { streamSSE } from '../lib/sse'
 import ToolTrajectory, { upsertTrajectory, type TrajectoryEntry } from '../components/ToolTrajectory'
 import CheckCard from '../components/CheckCard'
 import DayTabs from '../components/DayTabs'
 import TripTable from '../components/TripTable'
 import TripMap from '../components/TripMap'
+import ConfirmDialog from '../components/ConfirmDialog'
 
 export default function Overview() {
   const { tripId } = useParams<{ tripId: string }>()
@@ -35,6 +37,13 @@ export default function Overview() {
   const [busy, setBusy] = useState(false)
   const [errorBar, setErrorBar] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+
+  // ── 发布为攻略（M12）──
+  const [publishing, setPublishing] = useState(false)
+  const [publishRequesting, setPublishRequesting] = useState(false) // 仅发布请求进行中（确认框 busy）
+  const [publishDialogOpen, setPublishDialogOpen] = useState(false)
+  const [publishCheck, setPublishCheck] = useState<GuideListItem[]>([])
+  const [publishDone, setPublishDone] = useState<{ guide_id: string; title: string } | null>(null)
 
   const acRef = useRef<AbortController | null>(null)
   const countersRef = useRef<Record<string, number>>({})
@@ -176,6 +185,69 @@ export default function Overview() {
       setBusy(false)
     }
   }, [trip, busy, streaming])
+
+  // ── 发布为攻略（M12 · api.md 3.8）──
+  // 🔴 判据每次点击现查（GET /guides?source_trip_id=），不用页面缓存 —— 本地状态一定会过期
+  const handlePublishClick = useCallback(async () => {
+    if (!trip || publishing) return
+    setPublishing(true) // 立即挡双击
+    setErrorBar(null)
+    setPublishDone(null)
+    try {
+      const page = await listGuides({ source_trip_id: trip.trip_id })
+      if (page.total === 0) {
+        await doPublish(trip.trip_id)
+      } else {
+        setPublishCheck(page.items)
+        setPublishDialogOpen(true)
+      }
+    } catch (e) {
+      setErrorBar(e instanceof Error ? e.message : String(e))
+      setPublishing(false)
+    }
+  }, [trip, publishing])
+
+  // 🔴 Idempotency-Key：在 click handler 内生成一次，本次意图的所有重试共用；请求结束作废
+  const doPublish = useCallback(async (tid: string) => {
+    const key = crypto.randomUUID()
+    setPublishRequesting(true)
+    try {
+      const g = await publishAsGuide(tid, key, {})
+      setPublishDone({ guide_id: g.guide_id, title: g.title })
+    } catch (e) {
+      if (e instanceof ApiError && e.code === 'rate_limited') {
+        setErrorBar(`操作太频繁，请 ${e.retryAfter ?? 60} 秒后重试`)
+      } else {
+        setErrorBar(e instanceof Error ? e.message : String(e))
+      }
+    } finally {
+      setPublishRequesting(false)
+      setPublishing(false)
+      setPublishDialogOpen(false)
+    }
+  }, [])
+
+  const onPublishConfirm = useCallback(() => {
+    if (!trip) return
+    void doPublish(trip.trip_id)
+  }, [trip, doPublish])
+
+  const onPublishCancel = useCallback(() => {
+    setPublishDialogOpen(false)
+    setPublishing(false) // 取消 = 解锁按钮，结束
+  }, [])
+
+  const relTime = (iso: string | null): string => {
+    if (!iso) return ''
+    const ms = Date.now() - new Date(iso).getTime()
+    const days = Math.floor(ms / 86400000)
+    if (days <= 0) return '今天'
+    if (days === 1) return '昨天'
+    if (days < 30) return `${days} 天前`
+    const months = Math.floor(days / 30)
+    if (months < 12) return `${months} 个月前`
+    return `${Math.floor(months / 12)} 年前`
+  }
 
   // ── 视图一：空手进来 + 还没有行程 → 粘贴表单 ──
   if (!tripId && !trip) {
@@ -320,6 +392,13 @@ export default function Overview() {
           </button>
           <button
             className="btn-outline !text-[12px]"
+            disabled={publishing || busy}
+            onClick={() => void handlePublishClick()}
+          >
+            {publishing ? '发布中…' : '发布为攻略'}
+          </button>
+          <button
+            className="btn-outline !text-[12px]"
             disabled={busy}
             onClick={async () => {
               try {
@@ -343,6 +422,16 @@ export default function Overview() {
           </button>
         </div>
       </div>
+
+      {/* 发布成功提示 */}
+      {publishDone && (
+        <div className="mt-4 px-4 py-2.5 border border-status-pass rounded-[4px] text-status-pass text-[13px] bg-white flex items-center gap-2">
+          已发布为攻略《{publishDone.title}》。
+          <Link to={`/guides/${publishDone.guide_id}`} className="font-bold underline-offset-4 hover:underline">
+            去看看 →
+          </Link>
+        </div>
+      )}
 
       {errorBar && (
         <div className="mt-4 px-4 py-2.5 border border-status-fail rounded-[4px] text-status-fail text-[13px] bg-white">
@@ -406,6 +495,20 @@ export default function Overview() {
           <ToolTrajectory entries={trajectory} />
         </div>
       )}
+
+      {/* 发布为攻略：已发过 → 确认框（信息量：条数 + 最近一篇标题） */}
+      <ConfirmDialog
+        open={publishDialogOpen}
+        title="再发一篇攻略？"
+        busy={publishRequesting}
+        onConfirm={onPublishConfirm}
+        onCancel={onPublishCancel}
+      >
+        这条行程你已经发布过{' '}
+        <b className="text-ink font-bold">{publishCheck.length}</b> 篇攻略，最近一篇是
+        《{publishCheck[0]?.title ?? '—'}》
+        {publishCheck[0]?.published_at ? `（${relTime(publishCheck[0].published_at)}）` : ''}。要再发一篇吗？
+      </ConfirmDialog>
     </div>
   )
 }

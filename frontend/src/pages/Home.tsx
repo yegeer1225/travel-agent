@@ -12,6 +12,7 @@ function SpotCardView({
   cost,
   color,
   raised,
+  photos,
 }: {
   name: string
   city: string | null
@@ -20,14 +21,25 @@ function SpotCardView({
   cost: number | null
   color: string
   raised: boolean
+  photos: string[]
 }) {
   return (
     <div className={`card overflow-hidden ${raised ? 'raise' : ''}`}>
-      {/* 封面：纯色块 + 站名（photo 取不到时不用灰底占位图） */}
+      {/* 封面：photos[0] 真图（onError 隐藏，回退色块+站名，不用灰底占位图） */}
       <div
-        className="h-[150px] flex items-center justify-center relative"
+        className="h-[150px] flex items-center justify-center relative overflow-hidden"
         style={{ background: `var(--color-${color})` }}
       >
+        {photos[0] ? (
+          <img
+            src={photos[0]}
+            alt={name}
+            className="absolute inset-0 w-full h-full object-cover"
+            onError={(e) => {
+              e.currentTarget.style.display = 'none'
+            }}
+          />
+        ) : null}
         <span className="font-display font-bold text-[26px] tracking-wide uppercase">{name}</span>
       </div>
       <div className="p-4 pb-[18px]">
@@ -144,6 +156,7 @@ export default function Home() {
                 cost={r.cost_per_person}
                 color={['pop-yellow', 'pop-cyan', 'pop-blue', 'pop-green'][i % 4]}
                 raised={i % 2 === 0}
+                photos={r.photos}
               />
             ))}
           </div>

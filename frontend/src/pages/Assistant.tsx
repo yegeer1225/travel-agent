@@ -7,7 +7,7 @@ import type {
   SSEEvent,
   MessageMeta,
 } from '../types/contract'
-import { ApiError, createSession, getSession, listSessions } from '../lib/api'
+import { ApiError, createSession, deleteSession, getSession, listSessions } from '../lib/api'
 import { streamSSE } from '../lib/sse'
 import ToolTrajectory, { upsertTrajectory, type TrajectoryEntry } from '../components/ToolTrajectory'
 import CheckCard from '../components/CheckCard'
@@ -143,6 +143,22 @@ export default function Assistant() {
     setErrorBar(null)
   }, [])
 
+  /** 删除会话（DELETE /sessions/{id}，不删行程）。删除当前会话时回到新会话态 */
+  const onDeleteSession = useCallback(
+    async (sid: string) => {
+      try {
+        await deleteSession(sid)
+        setSessions((prev) => (prev ? prev.filter((s) => s.session_id !== sid) : prev))
+        if (currentSessionId === sid) {
+          startNew()
+        }
+      } catch (e) {
+        setErrorBar(e instanceof Error ? e.message : String(e))
+      }
+    },
+    [currentSessionId, startNew],
+  )
+
   const send = useCallback(
     async (raw?: string) => {
       const text = (raw ?? input).trim()
@@ -231,28 +247,50 @@ export default function Assistant() {
         <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-1.5">
           {sessions === null && <div className="text-muted text-[12px] p-2">加载中…</div>}
           {sessions?.map((s) => (
-            <button
+            <div
               key={s.session_id}
-              onClick={() => openSession(s.session_id)}
+              role="button"
+              tabIndex={0}
+              aria-label={s.title || '未命名会话'}
               className={[
-                'text-left px-3 py-2.5 rounded-[4px] border border-ink/0 text-[13px] transition-colors cursor-pointer',
+                'group flex items-center gap-1 px-3 py-2.5 rounded-[4px] border text-[13px] cursor-pointer transition-colors',
                 currentSessionId === s.session_id
                   ? 'bg-pop-yellow border-ink font-bold'
-                  : 'hover:bg-pop-yellow/40',
+                  : 'border-ink/0 hover:bg-pop-yellow/40',
               ].join(' ')}
+              onClick={() => openSession(s.session_id)}
+              onKeyDown={(e) => {
+                // 键盘可达（P3）：Enter / Space 等效点击
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  openSession(s.session_id)
+                }
+              }}
             >
-              <div className="flex items-center gap-2">
-                <span className="truncate">{s.title || '未命名会话'}</span>
-                {s.model && (
-                  <span className="text-[10px] px-1.5 py-0.5 border border-ink/40 rounded-[2px] text-muted shrink-0">
-                    {s.model}
-                  </span>
-                )}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="truncate">{s.title || '未命名会话'}</span>
+                  {s.model && (
+                    <span className="text-[10px] px-1.5 py-0.5 border border-ink/40 rounded-[2px] text-muted shrink-0">
+                      {s.model}
+                    </span>
+                  )}
+                </div>
+                <div className="text-[11px] text-muted mt-0.5">
+                  {s.updated_at.slice(5, 16).replace('T', ' ')}
+                </div>
               </div>
-              <div className="text-[11px] text-muted mt-0.5">
-                {s.updated_at.slice(5, 16).replace('T', ' ')}
-              </div>
-            </button>
+              <button
+                title="删除会话（不删行程）"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  void onDeleteSession(s.session_id)
+                }}
+                className="opacity-0 group-hover:opacity-100 text-[16px] leading-none px-1 text-muted hover:text-status-fail shrink-0"
+              >
+                ×
+              </button>
+            </div>
           ))}
           {sessions?.length === 0 && (
             <div className="text-muted text-[12px] p-2 leading-5">

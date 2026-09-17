@@ -1,15 +1,45 @@
 import { useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import type { SpotCard } from '../types/contract'
-import { searchSpots, ApiError } from '../lib/api'
+import { addFavorite, searchSpots, ApiError } from '../lib/api'
+import { getToken } from '../lib/auth'
 
-function ResultCard({ s }: { s: SpotCard }) {
+function ResultCard({ s, hasToken }: { s: SpotCard; hasToken: boolean }) {
   const color = ['pop-yellow', 'pop-cyan', 'pop-blue', 'pop-green'][s.poi_id.length % 4]
+  const [favMsg, setFavMsg] = useState<string | null>(null)
+  const [favBusy, setFavBusy] = useState(false)
+
+  const onFavorite = async () => {
+    setFavBusy(true)
+    setFavMsg(null)
+    try {
+      // 🔴 收 poi 必须传 name —— 当前 SpotCard 快照（api.md 2.6 / 交接文档十一节）
+      await addFavorite({ target_type: 'poi', target_id: s.poi_id, name: s.name, cover: s.photos[0] ?? null })
+      setFavMsg('已收藏')
+    } catch (e: unknown) {
+      setFavMsg(e instanceof Error ? e.message : String(e))
+    } finally {
+      setFavBusy(false)
+    }
+  }
+
   return (
     <div className="card p-4 flex gap-4 items-start">
+      {/* 左侧：photos[0] 真图（onError 隐藏，回退色块+站名，不用灰底占位图） */}
       <div
-        className="w-24 h-20 shrink-0 flex items-center justify-center rounded-[4px] border border-ink"
+        className="w-24 h-20 shrink-0 flex items-center justify-center rounded-[4px] border border-ink relative overflow-hidden"
         style={{ background: `var(--color-${color})` }}
       >
+        {s.photos[0] ? (
+          <img
+            src={s.photos[0]}
+            alt={s.name}
+            className="absolute inset-0 w-full h-full object-cover"
+            onError={(e) => {
+              e.currentTarget.style.display = 'none'
+            }}
+          />
+        ) : null}
         <span className="font-display font-bold text-lg tracking-wide uppercase">{s.name.slice(0, 2)}</span>
       </div>
       <div className="min-w-0 flex-1">
@@ -23,6 +53,18 @@ function ResultCard({ s }: { s: SpotCard }) {
         <div className="flex items-center gap-3 mt-2 text-[12px]">
           {s.cost_per_person !== null && <span>人均 ¥{s.cost_per_person}</span>}
           {s.typecode && <span className="px-2 py-0.5 border border-ink rounded-[2px] text-muted">{s.typecode}</span>}
+          {hasToken && (
+            <>
+              <button
+                className="btn-outline !text-[11px] !px-2.5 !py-1"
+                onClick={() => void onFavorite()}
+                disabled={favBusy}
+              >
+                {favBusy ? '收藏中' : favMsg === '已收藏' ? '✓ 已收藏' : '收藏'}
+              </button>
+              {favMsg && favMsg !== '已收藏' && <span className="text-status-fail">{favMsg}</span>}
+            </>
+          )}
         </div>
       </div>
     </div>
@@ -31,6 +73,9 @@ function ResultCard({ s }: { s: SpotCard }) {
 
 /** 景点搜索页：搜索页不是列表页 —— 进来没有数据，默认态显示引导文案 */
 export default function Spots() {
+  // 登录后跳回本页（路由变化）→ 重渲染 → hasToken 重新求值（P3：不再只算一次）
+  useLocation()
+  const hasToken = !!getToken()
   const [keyword, setKeyword] = useState('')
   const [city, setCity] = useState('')
   const [items, setItems] = useState<SpotCard[] | null>(null)
@@ -125,7 +170,7 @@ export default function Spots() {
           </div>
           <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
             {items.map((s) => (
-              <ResultCard key={s.poi_id} s={s} />
+              <ResultCard key={s.poi_id} s={s} hasToken={hasToken} />
             ))}
           </div>
         </div>
