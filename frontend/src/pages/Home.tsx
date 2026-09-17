@@ -88,7 +88,7 @@ export default function Home() {
 
       {/* ── Hero ── */}
       <section className="relative px-14 pt-[72px] pb-[88px]">
-        <div className="grid items-center gap-10 relative z-[2]" style={{ gridTemplateColumns: '620px 1fr' }}>
+        <div className="grid items-center gap-10 relative z-[2]" style={{ gridTemplateColumns: 'minmax(480px, 620px) minmax(0, 1fr)' }}>
           <div>
             <h1 className="font-display font-bold text-[62px] leading-[1.08] tracking-wide">
               AI 把行程

@@ -74,6 +74,9 @@ MODEL_REGISTRY: dict[str, dict[str, object]] = {
     # 2026-09-16 实测两模型均真实出结果；官方没有 deepseek-v4.1-flash，但 qwen3.7-flash / qwen3.7-plus 确认存在
     "qwen3.7-flash": {"provider": "bailian", "supports_thinking": False},
     "qwen3.7-plus": {"provider": "bailian", "supports_thinking": False},
+    # 2026-09-17 新增：DeepSeek 主 key 余额耗尽(402)后切百炼；该模型走百炼 key，
+    # 实测不带 json_object 约束 ~2.6s（带约束 11.4s），故 parse/generate 均改纯 prompt + Pydantic 兜底
+    "deepseek-v4-flash-0731": {"provider": "bailian", "supports_thinking": False},
 }
 
 _CREDENTIAL_BY_PROVIDER = {

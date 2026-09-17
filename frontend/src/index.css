@@ -36,9 +36,10 @@ body {
 }
 * { box-sizing: border-box; }
 
-/* 页面骨架：1440px 桌面端，不做响应式 */
+/* 页面骨架：1440px 桌面端；<1440 时占满视口避免横向滚动条（15.12，1024px 实测） */
 .page {
   width: 1440px;
+  max-width: 100%;
   margin: 0 auto;
   position: relative;
   overflow: hidden;

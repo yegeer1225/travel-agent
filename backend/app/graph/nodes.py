@@ -350,7 +350,7 @@ class Nodes:
         )
 
         try:
-            raw = await self.llm_extract.bind(response_format={"type": "json_object"}).ainvoke(
+            raw = await self.llm_extract.ainvoke(
                 [SystemMessage(content=INTENT_SYSTEM_PROMPT), HumanMessage(content=prompt)]
             )
         except Exception as exc:  # noqa: BLE001 —— 见模块 docstring 的 ②
@@ -590,7 +590,7 @@ class Nodes:
             SystemMessage(content=PLAN_SYSTEM_PROMPT),
             HumanMessage(content=build_plan_prompt(req, pool, hint)),
         ]
-        llm = self.llm_plan.bind(response_format={"type": "json_object"})
+        llm = self.llm_plan
 
         last_err: str | None = None
         for _ in range(2):

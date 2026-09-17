@@ -114,7 +114,7 @@ export default function Layout() {
             >
               TR
             </div>
-            <div className="font-display font-bold text-[17px] tracking-wide">旅游规划平台</div>
+            <div className="hidden min-[1280px]:block font-display font-bold text-[17px] tracking-wide whitespace-nowrap">旅游规划平台</div>
           </Link>
 
           <nav className="flex gap-1.5 ml-auto items-center">
@@ -127,7 +127,7 @@ export default function Layout() {
             {/* 搜索框：插在「旅游攻略」和「个人中心」中间（15.2，用户明确要求） */}
             <form onSubmit={submitSearch} className="flex items-center border border-ink rounded-[4px] overflow-hidden ml-1">
               <input
-                className="w-[132px] px-2.5 py-[7px] text-[12px] outline-none border-0"
+                className="w-[100px] xl:w-[132px] px-2.5 py-[7px] text-[12px] outline-none border-0"
                 placeholder="搜索景点…"
                 value={searchKw}
                 onChange={(e) => setSearchKw(e.target.value)}
