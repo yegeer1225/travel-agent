@@ -111,6 +111,9 @@ cd frontend && npm install && npm run dev                 # http://localhost:517
 # 5) 收录景点（**必做**，否则「旅游景点」页永远是空的）
 cd backend && ../.venv/Scripts/python scripts/seed_spots.py \
     --city 成都 --keywords "宽窄巷子,武侯祠,杜甫草堂,锦里,大熊猫繁育研究基地"
+
+# 6) 攻略社区的起始内容（**可选** —— 不跑就是空社区，功能不受影响）
+cd backend && ../.venv/Scripts/python scripts/seed_official_guides.py
 ```
 
 **为什么要第 5 步**：景点页搜的是**本站收录库**（`spots` 表），不是高德实时接口（D70）。
@@ -122,6 +125,20 @@ cd backend && ../.venv/Scripts/python scripts/seed_spots.py \
 | `python scripts/seed_spots.py --city 成都 --keywords "..."` | 收录（每个关键词取 1 条，`--top N` 可调） |
 | `python scripts/seed_spots.py --dry-run ...` | 只看会收什么，**不落库** |
 | `python scripts/seed_spots.py --list` | 看当前收录了什么（含采集时间） |
+
+**第 6 步（可选）为什么长这样**：攻略社区页的起始内容用的是**我们自己 agent 真实生成的行程**，
+经渲染器变成攻略、挂在一个**官方号**下（`travel_platform` / 昵称「**旅游规划平台**」= 站名）。
+**不用抓来的攻略** —— 那批是别人的文章（来源 URL 还"待补"），进社区等于转载且没署名（见 `eval/fixtures/README.md`）。
+和收录景点一样，它是**开发期动作**、幂等可重跑（幂等键 `seed:<trip_id>`，重跑不会重复发）。
+
+| 命令 | 作用 |
+|---|---|
+| `python scripts/seed_official_guides.py` | 发布起始攻略（默认最近 3 条真实行程，**按目的地去重**） |
+| `python scripts/seed_official_guides.py --dry-run` | 只看会发什么，**不落库、不建号** |
+| `python scripts/seed_official_guides.py --list` | 看官方号与它名下的攻略 |
+| `python scripts/seed_official_guides.py --trip <trip_id>` | 指定某条行程（可重复传） |
+
+> 依赖：库里得先有 `source='generated'` 的行程（即真的生成过几次）。一条都没有时脚本会提示。
 
 两个 Key 说明：
 
