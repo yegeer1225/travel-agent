@@ -2,6 +2,12 @@
 .env
 .env.local
 .env.*.local
+# 2026-09-17：手动备份的 .env.deepseek-402-bak 原来漏网（下面只写了 .env.bak，
+# 而实际文件名不带点）。它含真密钥，一次 `git add .` 就会写进 git 历史 ——
+# 而密钥进了历史，删文件是补不回来的，只能轮换密钥。
+# 所以用 `.env.*` 通配兜住所有手动备份，再显式放行模板。
+.env.*
+!.env.example
 
 # ---- Python ----
 __pycache__/
@@ -50,5 +56,4 @@ desktop.ini
 
 # ---- AI 助手的工作目录（不属于项目源码）----
 .workbuddy/
-.env.bak
 backend/uploads/
