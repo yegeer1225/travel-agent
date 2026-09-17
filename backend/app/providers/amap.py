@@ -57,7 +57,8 @@ MIN_INTERVAL_S = 0.45
 一次限流重试要等 1s，而多等 0.1s 什么都不会发生。
 
 ⚠️ 这是**进程内**限速（D28）。多进程部署时每个进程各自计数 → 实际 QPS 会翻倍，
-到 M5 上多 worker 时要换成 Redis 令牌桶。**现在不引 Redis 是刻意的**（单进程够用）。"""
+到 M5 上多 worker 时要换成 Redis 令牌桶。**现在不引 Redis 是刻意的**（单进程够用）。
+⚠️ 状态必须是**模块级**（见下方 `_next_slot_ts`）—— 放实例级会漏，因为 provider 每请求新建。"""
 
 _RETRY_BACKOFF_S = (1.0, 2.0, 4.0)
 """重试退避（D26）。GET 天然幂等，所以可以无脑重试。"""
@@ -246,6 +247,18 @@ def _haversine_km(a: tuple[float, float], b: tuple[float, float]) -> float:
 # ══════════════════════════════════════════════════════════════
 
 
+# ── 限速状态（**模块级**，进程内共享）─────────────────────────
+# 限速约束的是「这把 Key 的出站速率」，与 provider 实例无关。
+# 放实例级是错的：provider 是**每请求新建**的（`api/chat_stream.py` 的 factory
+# 每请求建图 → 每请求建 provider），实例级状态等于"每个请求各限各的"
+# → 并发 N 个请求就是 2.2N QPS，必然撞高德限流（实测第 3~4 个就炸）。
+#
+# 取号式排队：`_throttle` 先**同步地取走**自己那一格的发车时刻，再异步等。
+# 取号的两行之间没有 await，在单 event loop 里天然原子 —— 既不需要锁，也不碰 loop，
+# 所以跨 event loop（pytest 每个用例一个 loop）也不会出问题。
+_next_slot_ts = 0.0
+
+
 class AmapHttpProvider:
     """`AmapProvider` 协议的真实实现。**签名与 `MockAmapProvider` 完全一致**（D23）。"""
 
@@ -267,8 +280,6 @@ class AmapHttpProvider:
         # 退避时长可注入，否则测"重试"要真等 1+2+4 秒（测试会慢到没人愿意跑）
         self._retry_backoff = retry_backoff_s if retry_backoff_s is not None else _RETRY_BACKOFF_S
         self._client: httpx.AsyncClient | None = None
-        self._lock = asyncio.Lock()
-        self._last_call = 0.0
         self._adcode_cache: dict[str, str] = {}
         """城市名 → adcode。**这个缓存值得有**：一次行程里同一目的地会被查很多次天气，
         而地理编码是纯浪费（地名不会在几分钟内变）。"""
@@ -288,12 +299,22 @@ class AmapHttpProvider:
             await self._client.aclose()
 
     async def _throttle(self) -> None:
-        """进程内的最小间隔限速。锁在 `sleep` 期间持有 —— 这正是串行化的目的。"""
-        async with self._lock:
-            wait = self._min_interval_s - (time.monotonic() - self._last_call)
-            if wait > 0:
-                await asyncio.sleep(wait)
-            self._last_call = time.monotonic()
+        """**进程内**共享的最小间隔限速。
+
+        取号式：先原子地取走"我这格的发车时刻"，把它推进到 `_next_slot_ts`，
+        再异步等到那一刻。并发调用会自然排成一队，而不是各等各的。
+
+        ⚠️ 状态在模块级（`_next_slot_ts`），**不能用实例变量** —— 见那一处的说明。
+        """
+        global _next_slot_ts
+
+        now = time.monotonic()
+        my_slot = max(now, _next_slot_ts)  # 到点就走，没到就排队
+        _next_slot_ts = my_slot + self._min_interval_s
+
+        wait = my_slot - now
+        if wait > 0:
+            await asyncio.sleep(wait)
 
     async def _request(self, path: str, **params: Any) -> dict[str, Any]:
         """打一发 GET，把**业务错误码**翻译成异常或重试。

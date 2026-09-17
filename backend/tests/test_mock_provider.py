@@ -57,9 +57,16 @@ def test_mock_satisfies_provider_protocol(provider: MockAmapProvider) -> None:
     assert provider.name == "mock"
 
 
-def test_build_provider_defaults_to_mock() -> None:
-    """默认（`.env` 里 `AMAP_PROVIDER=mock`）造出来的就是 mock。"""
-    assert isinstance(build_provider(), MockAmapProvider)
+def test_build_provider_follows_configured_provider() -> None:
+    """不传 settings 时按**全局配置**（`.env`）造 provider —— 配置写什么就造什么。
+
+    ⚠️ 这里**故意不把断言写死成"是 mock"**。早期版本那么写，于是把运行档切成 `real`
+    就会把这条测试打红 —— **测试不该跟本机配置绑死**（那是最难查的一类红：
+    代码没坏，是环境变了）。
+    """
+    from app.config import settings
+
+    assert build_provider().name == settings.amap_provider
 
 
 # ══════════════════════════════════════════════════════════════

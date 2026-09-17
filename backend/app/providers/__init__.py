@@ -14,9 +14,9 @@ from app.providers.mock import MOCK_CITY, MockAmapProvider
 def build_provider(settings: Settings | None = None) -> AmapProvider:
     """按配置造数据源。
 
-    ⚠️ `real` 分支是**延迟导入**的。原因：M1 阶段 `providers/amap.py` 还不存在，
+    ⚠️ `real` 分支是**延迟导入**的。历史原因：M1 阶段 `providers/amap.py` 还不存在，
     顶层 import 会让整个包在 M1 期间都跑不起来 —— 而 M1 的全部工作都建立在 mock 上。
-    延迟导入让"M2 还没写"这件事只影响 `AMAP_PROVIDER=real` 这一条路径。
+    M2 落地后该文件已存在，延迟导入继续保留：不用 `real` 的路径**完全不加载**高德那套代码。
     """
     s = settings or default_settings
 
@@ -31,10 +31,10 @@ def build_provider(settings: Settings | None = None) -> AmapProvider:
 
     try:
         from app.providers.amap import AmapHttpProvider
-    except ImportError as exc:  # pragma: no cover - M2 落地后此分支消失
+    except ImportError as exc:  # pragma: no cover - 兜底分支
         raise RuntimeError(
-            "AMAP_PROVIDER=real 需要 app/providers/amap.py，但它还没实现（排在 M2）。"
-            "现在请用 AMAP_PROVIDER=mock"
+            "AMAP_PROVIDER=real 需要 app/providers/amap.py 能导入，但导入失败了。"
+            f"检查该文件是否存在、依赖是否装全（httpx）。原始错误：{exc}"
         ) from exc
 
     return AmapHttpProvider(s.amap_webservice_key)
