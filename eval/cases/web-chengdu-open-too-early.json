@@ -1,0 +1,19 @@
+{
+  "id": "web-chengdu-open-too-early",
+  "kind": "hotstart",
+  "title": "负例 open_today（太早）：太古里排当天第 1 站 → 09:00 到，商场 10:00 才开门",
+  "source": "eval/fixtures/web-chengdu-2d-tianfu.md 的变体 —— 原文把「春熙路+太古里」排在 Day2 下午，这里埋成**当天第一站**。真攻略来源 URL 待补",
+  "text": "成都一日购物逛街路线。\n一早先去成都太古里，逛新潮店铺和方所书店；然后步行到春熙路步行街；中午去宽窄巷子，青瓦灰墙走一圈；下午去人民公园，在茶馆坐一会儿。",
+  "destination": "成都",
+  "k": 3,
+  "expect": {
+    "should_flag": [
+      { "code": "open_today", "day": 1, "note": "太古里排第 1 站 → 到达时刻恒为 DAY_START 09:00，而它 10:00-22:00 → 早到一小时。这条**不依赖任何距离与停留数字**（09:00 是常量），是 open_today 最稳的一种埋法" }
+    ],
+    "should_not_flag": [
+      { "code": "walk_load", "day": 1 },
+      { "code": "reachable", "day": 1 }
+    ],
+    "must_contain_pois": ["太古里", "春熙路", "宽窄巷子", "人民公园"]
+  }
+}

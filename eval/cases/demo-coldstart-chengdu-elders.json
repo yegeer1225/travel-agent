@@ -1,0 +1,17 @@
+{
+  "id": "demo-coldstart-chengdu-elders",
+  "kind": "coldstart",
+  "title": "演示：成都两日带爸妈（与 demo-coldstart-chengdu-2d 只差同行人一句）",
+  "source": "AI 写的演示 case，非真实攻略 —— 目的是测「生成阶段有没有吃同行人档位」。真实 case 的攒法见 eval/fixtures/README.md",
+  "text": "后天去成都玩2天，带爸妈，节奏慢一点，别安排太多景点",
+  "k": 1,
+  "today": "2026-09-17",
+  "expect": {
+    "max_days": 2,
+    "min_stops": 3,
+    "should_not_flag": [
+      { "code": "walk_load", "day": 1 },
+      { "code": "walk_load", "day": 2 }
+    ]
+  }
+}

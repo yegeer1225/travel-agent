@@ -1,0 +1,19 @@
+{
+  "id": "web-chengdu-reachable-single-hop",
+  "kind": "hotstart",
+  "title": "负例 reachable（单跳）：市区看完直接开去峨眉山，单跳约 150min 超 120 上限",
+  "source": "人工构造的埋点（非某篇攻略派生）—— 用于补 `reachable` **单跳**这一条路径。真攻略来源 URL 无",
+  "requires": "real",
+  "text": "成都一日：市区看完直接开去峨眉山。\n上午先去武侯祠看红墙竹影；中午在宽窄巷子吃饭；下午出发开车去峨眉山，上山住一晚。",
+  "destination": "成都",
+  "k": 3,
+  "expect": {
+    "should_flag": [
+      { "code": "reachable", "day": 1, "note": "单跳：宽窄巷子→峨眉山约 150min，超过 120 上限。⚠️ `reachable` 的单跳与当天累计**共用同一个 code**（看 msg 区分），断言分不出来 —— 这条的意图是单跳（预计累计约 174min，未超 180）。真数字待 real 跑一次确认，若实际 <120 需换更远的点" }
+    ],
+    "should_not_flag": [
+      { "code": "walk_load", "day": 1 }
+    ],
+    "must_contain_pois": ["武侯祠", "宽窄巷子", "峨眉山"]
+  }
+}

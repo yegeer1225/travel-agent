@@ -1,0 +1,16 @@
+{
+  "id": "web-chengdu-3d-family-green",
+  "kind": "hotstart",
+  "title": "边界绿：原文自带「带娃」（小孩档 6.0km）+ Day1 五站 = 估算 6.0km，恰好卡在界内",
+  "source": "eval/fixtures/web-chengdu-3d-family.md（真攻略，来源 URL 待补）。原文含「暑假带娃逛成都」→ travelers 应抽出 children=1 → 步行上限走小孩档 6.0km；5 站 × 1.2 = 6.0 ≤ 6.0 判通过",
+  "text": "暑假带娃逛成都、看熊猫，不赶行程，慢悠悠吃，慢悠悠逛。\nDay1：上午去宽窄巷子，青瓦灰墙、木门雕花，随手拍都是古风大片；下午去人民公园，鹤鸣茶社点一杯盖碗茶；然后去武侯祠，红墙竹影超好拍；晚上去锦里古街，红灯笼亮起来最美；最后再走到春熙路逛逛。\nDay2：清晨去成都大熊猫繁育研究基地，7:30 开园就冲南门。",
+  "destination": "成都",
+  "k": 3,
+  "expect": {
+    "should_flag": [],
+    "should_not_flag": [
+      { "code": "walk_load", "day": 1 }
+    ],
+    "must_contain_pois": ["宽窄巷子", "人民公园", "武侯祠", "锦里", "春熙路", "熊猫"]
+  }
+}

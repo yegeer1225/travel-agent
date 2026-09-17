@@ -1,0 +1,18 @@
+{
+  "id": "web-chengdu-walkload-elder-green",
+  "kind": "hotstart",
+  "title": "正例 walk_load（带长辈、0.2km 余量）：Day1 四站 = 估算 4.8km vs 长辈上限 5.0km —— 界内绿",
+  "source": "人工构造的正例（非某篇攻略派生）。**补齐长辈档的边界对**：`tianfu-elders` 是五站 6.0>5.0 红，这条是四站 4.8≤5.0 绿 —— 两者合起来把 5.0 这条线从两侧夹住",
+  "text": "带爸妈逛成都市区，节奏放慢。上午去人民公园喝茶；中午到宽窄巷子吃饭、逛文创；下午去武侯祠，红墙竹影；傍晚去锦里古街看灯笼。",
+  "destination": "成都",
+  "k": 3,
+  "expect": {
+    "should_flag": [],
+    "should_not_flag": [
+      { "code": "walk_load", "day": 1 },
+      { "code": "reachable", "day": 1 },
+      { "code": "open_today", "day": 1 }
+    ],
+    "must_contain_pois": ["人民公园", "宽窄巷子", "武侯祠", "锦里"]
+  }
+}

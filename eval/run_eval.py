@@ -18,8 +18,11 @@
 
 # 双模型对比：换模型再跑一次同 label 口径，然后并排比
 # （改 .env 的 LLM_MODEL_TOOL / LLM_MODEL_PLAN → 跑 → --compare）
-../.venv/Scripts/python.exe eval/run_eval.py --provider real --label qwen --compare reports/<stamp>-deepseek.json
+../.venv/Scripts/python.exe eval/run_eval.py --provider real --label qwen --compare eval/reports/<stamp>-deepseek.json
 ```
+
+⚠️ `--provider` 只管**数据源**（高德），**LLM 两种模式都真调** ——
+mock 只是不花高德的钱，跑评测照样消耗模型额度。
 
 ═══════════════════════════════════════════════════════════════
  判分口径（D53 定稿，与 方案.md 6.x 的评测口径对接）
@@ -30,6 +33,7 @@
 | coldstart 成功 | 跑通 + 出行程 + **硬错 0** + expect 全满足 | 生成是"应该没错"的路径，打回机制兜着 |
 | hotstart 成功 | 跑通 + 出行程 + expect 全满足（**不要求硬错 0**） | 粘贴行程自带错误，`should_flag` 抓到才算本事 |
 | `should_flag` | flatten 后存在 code 相同 + status=fail + day 匹配的判据 | 攻略标注的"已知错"抓错率（技术方案 风险 11：只标硬判据可验证的错） |
+| `should_not_flag` | 同上匹配，但**要求不存在** fail（`unknown` 不算） | **误报率** —— 正例与阈值边界例靠它表达；命中即判失败 |
 | `must_contain_pois` | 行程站名含该子串 | hotstart 保真度：粘贴的站不许被解析丢掉 |
 | `max_days` / `min_stops` | 结构断言 | 需求遵循度 |
 | 软判据越界 | `find_overreach(msg)` 非空的条数 | **门槛 = 0**（D45：不能评对错就评越界） |
@@ -107,6 +111,23 @@ def _expect_failures(trip: dict, expect: dict) -> list[str]:
         )
         if not hit:
             bad.append(f"should_flag 未触发：{code}" + (f"（day {day}）" if day else ""))
+
+    # should_not_flag：**反向断言** —— 这里报 fail 就是误报。
+    # 为什么必须有：正例（真攻略原样）和阈值边界例（刚好卡在界内）都靠它表达，
+    # 而误报率是最贵的一项 —— 冤枉一次会让 agent 白重排一轮（钱 + 时间）。
+    # 没有它，所有 case 都只能是"必须命中"，"不该报"这件事在报告里无处安放。
+    for want in expect.get("should_not_flag") or []:
+        code, day = want.get("code"), want.get("day")
+        stray = [
+            w for w, c in where_checks
+            if c.get("code") == code and c.get("status") == "fail"
+            and (day is None or w == f"d{day}" or w.startswith(f"d{day}s"))
+        ]
+        if stray:
+            bad.append(
+                f"should_not_flag 误报：{code}" + (f"（day {day}）" if day else "")
+                + f" @ {','.join(stray)}"
+            )
 
     for name in expect.get("must_contain_pois") or []:
         if not any(name in (s.get("name") or "") for s in stops):
@@ -271,6 +292,8 @@ def _write_report(results: list[dict], agg: dict, label: str) -> tuple[Path, Pat
     lines = [
         f"# 评测报告：{label}", "",
         f"- 时间：{stamp}｜provider：`{agg['provider']}`｜cases：{agg['cases']}",
+        *([f"- ⏭ 跳过 {len(agg['skipped'])} 条（`requires` 不匹配本 provider）："
+           + "、".join(f"`{s}`" for s in agg["skipped"])] if agg.get("skipped") else []),
         f"- **pass@k = {agg['pass_at_k']}%**（≥1 次成功的 case 占比）",
         f"- **pass^k = {agg['pass_pow_k']}%**（k 次全成功的 case 占比，一致性）",
         f"- unknown 占比均值：{agg['unknown_pct_avg']}%　｜软判据越界总数：**{agg['overreach_total']}**（门槛 0）",
@@ -356,8 +379,29 @@ async def main() -> int:
         provider = MockAmapProvider()
         provider_name = "mock"
 
+    # `requires`：把 case 绑到某个 provider 上（可选字段，缺省 = 两个模式都能跑）。
+    # 为什么需要它：有些判据**物理上只在一个 provider 下可触发** ——
+    # 比如 `reachable` 单跳（mock 池内最大单跳 88min，够不到 120 上限）。
+    # 没有这个机制，那种 case 放进目录就会让 mock 全量跑变红，
+    # 于是"mock 全绿基线"被破坏，只能靠人记着`--cases`排除哪些 —— 靠记的约束必然腐烂。
+    runnable, skipped = [], []
+    for case in cases:
+        need = case.get("requires")
+        if need and need != provider_name:
+            skipped.append(case["id"])
+            continue
+        runnable.append(case)
+    cases = runnable
+
+    if not cases:
+        print(f"没有可在 {provider_name} 下跑的 case（跳过 {len(skipped)} 条）")
+        return 1
+
+    skip_note = f"｜跳过 {len(skipped)} 条（需别的 provider）" if skipped else ""
     print(f"{_LINE}\n M8 评测｜label={args.label}｜provider={provider_name}"
-          f"｜cases={len(cases)}\n{_LINE}")
+          f"｜cases={len(cases)}{skip_note}\n{_LINE}")
+    for sid in skipped:
+        print(f"  ⏭ 跳过 {sid}（requires ≠ {provider_name}）")
 
     results = []
     for case in cases:
@@ -368,6 +412,7 @@ async def main() -> int:
     agg = _aggregate(results)
     agg["provider"] = provider_name
     agg["label"] = args.label
+    agg["skipped"] = skipped
 
     md_path, json_path = _write_report(results, agg, args.label)
     print(f"\n{_LINE}\n pass@k = {agg['pass_at_k']}%｜pass^k = {agg['pass_pow_k']}%"

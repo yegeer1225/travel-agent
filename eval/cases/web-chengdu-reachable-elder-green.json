@@ -1,0 +1,18 @@
+{
+  "id": "web-chengdu-reachable-elder-green",
+  "kind": "hotstart",
+  "title": "正例 reachable（带长辈、6 分钟余量）：单跳 85min vs 长辈上限 90min —— 界内绿",
+  "source": "人工构造的正例（非某篇攻略派生）。**这条是有来历的**：`mock.py` 的距离校准注释里写着，改造之前 mock 把「人民公园→都江堰」算成 160min，于是 `reachable`（带长辈上限 90）**把一份正常行程判成硬错、白白打回两轮**。这条正例就是那道伤疤的回归防线",
+  "text": "带爸妈去都江堰散心。上午先去武侯祠看红墙竹影；中午吃完饭开车去都江堰景区，看水利工程，傍晚回成都。",
+  "destination": "成都",
+  "k": 3,
+  "expect": {
+    "should_flag": [],
+    "should_not_flag": [
+      { "code": "reachable", "day": 1 },
+      { "code": "open_today", "day": 1 },
+      { "code": "walk_load", "day": 1 }
+    ],
+    "must_contain_pois": ["武侯祠", "都江堰"]
+  }
+}

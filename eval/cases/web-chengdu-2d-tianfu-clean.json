@@ -1,0 +1,16 @@
+{
+  "id": "web-chengdu-2d-tianfu-clean",
+  "kind": "hotstart",
+  "title": "正例：真攻略原样（Day1 五站，无同行人 → 不该报步行超限）",
+  "source": "eval/fixtures/web-chengdu-2d-tianfu.md（真攻略，来源 URL 待补）—— text 是原文行程段落的忠实浓缩，站点与先后顺序照原文未改",
+  "text": "成都两天一夜不走回头路：Day1 撸熊猫+老城夜景；Day2 三国人文+潮流地标。\nDay1：上午去成都大熊猫繁育研究基地，7点半开园就进去了，园区逛了3小时；中午回到宽窄巷子，喝茶、逛文创，待了2小时；下午去人民公园，在茶馆坐了一会儿；傍晚到武侯祠，红墙竹影；晚上去锦里古街看灯笼。\nDay2：上午金沙遗址博物馆看古蜀太阳神鸟；中午吃完饭去春熙路；下午逛太古里。",
+  "destination": "成都",
+  "k": 3,
+  "expect": {
+    "should_flag": [],
+    "should_not_flag": [
+      { "code": "walk_load", "day": 1 }
+    ],
+    "must_contain_pois": ["熊猫", "宽窄巷子", "人民公园", "武侯祠", "锦里"]
+  }
+}

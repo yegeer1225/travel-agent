@@ -23,8 +23,29 @@ cd /d/vscode\ Projiects/agent   # 项目根
 
 # 3. 双模型对比：改 .env 的 LLM_MODEL_TOOL / LLM_MODEL_PLAN → 再跑一次 → 对比
 ./.venv/Scripts/python.exe eval/run_eval.py --provider real --label qwen \
-    --compare reports/<时间戳>-deepseek.json
+    --compare eval/reports/<时间戳>-deepseek.json
 ```
+
+## ⚠️ `--provider mock` 省高德的钱，**不省 LLM 的钱**
+
+容易踩的认知陷阱（2026-09-17 实测确认）：
+
+| | `--provider mock` | `--provider real` |
+|---|---|---|
+| 高德出站 | ❌ 零调用（读本地 9 个点的池） | ✅ 真调用（0.45s/次限速） |
+| **LLM** | ✅ **照常真调用** | ✅ 真调用 |
+
+`--provider` 只管**数据源**；LLM 永远走 `.env` 的 `LLM_MODEL_TOOL` / `LLM_MODEL_PLAN`。
+所以"mock 模式下跑评测不要钱"是错的 —— 每条 case 都在真调模型：
+
+| 路径 | 每条 case 的 LLM 次数 | 实测耗时 |
+|---|---|---|
+| hotstart | 2（解析地名清单 + 软检查） | 3s 左右 |
+| coldstart | 整个生成循环 | 27~29s |
+
+**想让评测跑在免费额度上**：把 `.env` 两个模型换成百炼档（`qwen3.7-flash`）。
+代价是慢 —— 同类 prompt 实测 51.8s vs `deepseek-flash` 3.7s（差 14 倍），
+hotstart 一条就从 3s 涨到 100s+。要跑全量建议留给睡前。
 
 ## 报告里四个数字怎么看
 
@@ -40,6 +61,8 @@ cd /d/vscode\ Projiects/agent   # 项目根
 - **coldstart 成功** = 跑通 + 出行程 + **硬错 0** + expect 全满足（生成的行程不该带错）
 - **hotstart 成功** = 跑通 + 出行程 + expect 全满足，**不要求硬错 0**
   ——粘贴行程的错误被 `should_flag` 抓到才是价值（抓错率）
+- **正例 / 阈值边界例** 靠 `expect.should_not_flag` 表达"不该报"：命中即判失败（**误报**）。
+  `status=unknown` 不算误报（三态）。没有它，所有 case 都只能写成"必须命中"
 - 判分**一行 LLM 都不碰**：硬判据读引擎算好的 checks，措辞用 `find_overreach` 正则，
   结构断言纯比较 —— 裁判不是被评的东西，数字才可信
 - case 怎么写、什么错能标：见 `fixtures/README.md`
