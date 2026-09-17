@@ -81,14 +81,19 @@ class CoordSys(StrEnum):
 
 
 class AuthorType(StrEnum):
-    """内容是"人"发的还是"系统"发的。系统内容没有 user_id（NULL）。"""
+    """内容是"人"发的还是"系统"发的。系统内容没有 user_id（NULL）。
+
+    ⚠️ 现状：**只有 `USER` 会被产出** —— `api/views.py` 唯一实现点硬编码 `"user"`，
+    因为 DB 层 `guides.user_id` 是 NOT NULL、也没有这一列（见 `技术方案.md` 3.3 的
+    「设计有、实现无」块）。`SYSTEM` 是留给"系统发布的真实攻略"的扩展位，**尚未打通**。
+    """
 
     USER = "user"
     SYSTEM = "system"
 
 
 class Visibility(StrEnum):
-    """**只有 `guide_posts` 这张表有这个字段**（A27）。
+    """**只有 `guides` 这张表有这个字段**（A27）。
 
     其余表一律默认私有，靠 `WHERE user_id` 隔离 —— 给每张表都加 visibility
     会让人误以为存在公开读路径，从而漏写 WHERE。
