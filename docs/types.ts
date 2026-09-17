@@ -491,6 +491,8 @@ export interface HealthResponse {
   model_tool: string
   model_plan: string
   amap_configured: boolean
+  amap_provider_requested: string
+  amap_degraded: boolean
 }
 
 

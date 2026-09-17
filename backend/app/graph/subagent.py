@@ -88,6 +88,12 @@ MAX_SUB_SEARCHES = 6
 """子 agent 内部**搜索次数**上限（每个关键词算一次）。
 一次 task 给 6 个关键词已经很宽裕：正常用法是 2~4 个。"""
 
+MAX_DEDUPE_NAMES = 30
+"""跨 `task` 去重时，拼进任务描述的地点名上限（D65）。
+
+必须截断：池子实测能到几十条，全塞进去会把子代理的输入撑大，
+反而挤掉真正的任务描述（那才是它该看的东西）。"""
+
 SUB_SYSTEM_PROMPT = """你是搜索规划员。主规划师交给你一个找地点的任务，你来完成搜索并给出精选清单。
 
 你每一轮输出一个 JSON 对象（不要 markdown 代码块），二选一：
@@ -396,6 +402,21 @@ def build_search_subagent(
     return builder.compile()
 
 
+def _already_found_hint() -> str:
+    """把候选池里已收录的地点名拼成一句「别重复」的提示（D65）。
+
+    返回空串的情况：没有活动池子，或池子还是空的 —— 两种情况都**静默返回**。
+
+    ⚠️ 这正是 D65「代价 3」说的静默失效点：`task` 必须在 `tool_step` 的
+    `poi_pool_scope` **内部**执行才读得到池。若哪天有人把它移出那个作用域，
+    去重会**悄悄不生效且不报错**。所以这段注释留在这里 —— 依赖要能被看见。
+    """
+    pool = poi_pool.current_pool()
+    if pool is None or len(pool) == 0:
+        return ""
+    return "、".join(p.name for p in pool.all()[:MAX_DEDUPE_NAMES])
+
+
 def build_task_tool(
     *,
     subgraph: CompiledStateGraph,
@@ -423,9 +444,24 @@ def build_task_tool(
         if not objective.strip():
             return "任务描述是空的，没法搜索。请写清楚要找什么（城市 + 哪类地点 + 约束）。"
 
+        brief = objective.strip()
+
+        # ── D65：把候选池里已收录的地点拼进任务描述 ──
+        # 根因：每次 `task` 调用都 `ainvoke({... "keywords": [], "notes": [] ...})`
+        # → 子代理的「已搜过什么」每次从空开始；而 `sub_plan` 从不读池、
+        # 主 agent 也看不到池内容 → 派 task 时**没有去重依据**。
+        # 实测（杭州那轮）：7 个 task 里第 5/6/7 个高度重叠，多烧 ≈2 分钟。
+        #
+        # 为什么是"拼字符串"而不是给子代理加个查池工具：见 DECISIONS D65。
+        # 一句话：加工具 = 多一次调用 + 子代理**仍可能不查**；用它换一个
+        # 不确定的行为不划算。⚠️ 这是**提示级**去重，不保证消除。
+        found = _already_found_hint()
+        if found:
+            brief = f"{brief}\n\n⚠️ 这些地点前面已经搜到过，不要重复推荐：{found}"
+
         result = await subgraph.ainvoke(
             {
-                "objective": objective.strip(),
+                "objective": brief,
                 "city": city.strip() or default_city,
                 "notes": [],
                 "keywords": [],

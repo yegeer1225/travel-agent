@@ -151,6 +151,10 @@ class ScriptedSearchProvider:
 
     name = "scripted"
 
+    def covers(self, city: str | None) -> bool:  # pragma: no cover - 这些用例不判覆盖
+        """`AmapProvider` 协议要求（D67-B）。本文件不走工具循环。"""
+        return True
+
     def __init__(self, pois: list[AmapPoi]) -> None:
         self.pois = pois
         self.limits: list[int] = []

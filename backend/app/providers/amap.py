@@ -264,6 +264,14 @@ class AmapHttpProvider:
 
     name = "real"
 
+    def covers(self, city: str | None) -> bool:
+        """真实高德数据不分城市 —— 恒 `True`（D67-B）。
+
+        意义在于：「数据源覆盖不到」这道判断在 real 档下**自动失效**，
+        不需要在任何调用点写 `if mock_mode`。D23 那层抽象就是为这个准备的。
+        """
+        return True
+
     def __init__(
         self,
         key: str,

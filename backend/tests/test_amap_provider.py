@@ -562,6 +562,19 @@ def test_real_provider_satisfies_protocol():
     assert provider.name == "real"
 
 
+def test_covers_is_always_true_for_the_real_provider():
+    """真实高德数据不分城市 —— 恒 `True`（D67-B）。
+
+    这一点就是"切到 real 之后，覆盖判断**自动失效**"的实现方式：
+    所以 `agent_step` 的守卫和 `generate_plan` 的分因判断里，
+    都不需要写 `if mock_mode` 这种条件。
+    """
+    provider = AmapHttpProvider("k")
+    assert provider.covers("杭州") is True
+    assert provider.covers("成都") is True
+    assert provider.covers(None) is True
+
+
 def test_mock_and_real_have_same_public_surface():
     """两个实现的**参数名必须逐个一致**。
 

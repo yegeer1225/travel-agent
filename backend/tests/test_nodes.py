@@ -77,6 +77,12 @@ class BoomProvider:
 
     name = "boom"
 
+    def covers(self, city: str | None) -> bool:
+        """⚠️ 必须 `True`（D67-B）。它的用途是"让流程走到工具那一步才炸"；
+        若它自称覆盖不了，`agent_step` 的守卫会**提前**拦掉，
+        "工具抛异常 → 变成 ToolMessage"这条路径就测不到了。"""
+        return True
+
     async def search_poi(self, keyword, city=None, limit=10):
         raise RuntimeError("上游炸了")
 
@@ -489,6 +495,49 @@ def test_generate_plan_refuses_when_pool_is_empty():
     assert "error" in out
     assert "候选池是空的" in out["error"]
     assert nodes.llm_plan.call_count == 0, "既然注定要拦，就别花这次钱"
+
+
+def _hangzhou_requirements() -> dict:
+    """目的地**不在 mock 池覆盖范围内**的需求。D67 的两个测试都用它。"""
+    return (
+        Requirements(destination="杭州", date=TODAY).with_defaults().model_dump(mode="json")
+    )
+
+
+def test_generate_plan_blames_the_data_source_when_it_cannot_cover():
+    """池空的两种成因要说清是哪一种（D67-A）。
+
+    旧文案把『调了 9 次、每次数据源都返回空』也说成『模型没有成功调用过
+    search_poi』，于是『目的地不在数据源覆盖范围内』被读成了『模型偷懒』——
+    排查方向直接跑偏（作者本人被它误导过）。
+    """
+    nodes = make_nodes(plan_script=[ai_text(GOOD_DRAFT)])
+    out = run(
+        nodes.generate_plan(
+            _req_state(collected_pois={}, requirements=_hangzhou_requirements())
+        )
+    )
+
+    assert "覆盖不到" in out["error"]
+    assert "杭州" in out["error"]
+    assert "没有成功调用过" not in out["error"], "这条不是模型的问题，别这么说"
+    assert nodes.llm_plan.call_count == 0, "既然注定要拦，就别花这次钱"
+
+
+def test_agent_step_blocks_when_the_data_source_cannot_cover():
+    """D67-B：数据源覆盖不到目的地时，连工具循环都不进。
+
+    拦的理由是『可预知地浪费』：实测非成都目的地会白等 **159s**
+    （其中 ≈100s 花在 7 次注定为空的搜索）才报错。
+    判据由 provider 自述（`covers`）→ real 档下这道守卫**自动失效**，
+    所以这里也顺带保证了它不会拦住真数据。
+    """
+    nodes = make_nodes(tool_script=[ai_tool_call("task", {"objective": "找杭州的景点"})])
+    out = run(nodes.agent_step(_req_state(requirements=_hangzhou_requirements())))
+
+    assert "覆盖不到" in out["error"]
+    assert out["messages"][0].content == out["error"], "要和预算守卫同构：回一条纯文本"
+    assert nodes.llm_tool.call_count == 0, "拦在这里就是为了不花这次钱"
 
 
 def test_generate_plan_returns_draft():

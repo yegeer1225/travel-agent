@@ -17,4 +17,7 @@ def health() -> dict:
         "model_tool": settings.llm_model_tool,
         "model_plan": settings.llm_model_plan,
         "amap_configured": bool(settings.amap_webservice_key),
+        # D66：两个档一起给，才能区分「主动用 mock」和「缺 Key 被降级」
+        "amap_provider_requested": settings.amap_provider_requested or settings.amap_provider,
+        "amap_degraded": settings.amap_degraded,
     }

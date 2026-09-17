@@ -379,6 +379,25 @@ class MockAmapProvider:
 
     name = "mock"
 
+    def covers(self, city: str | None) -> bool:
+        """池子只有成都的数据（D67-B）。
+
+        🔴 判据必须与 `search_poi` 里的城市过滤**逐字对齐**。那边写的是：
+
+        ```python
+        if city and MOCK_CITY not in city:      # search_poi 里
+            return []
+        ```
+
+        → **没给城市时不拦**（那种情况下 `search_poi` 会照常搜池子）。
+
+        这两处不一致会造出两种错，而且**都不报错**：
+        · 保守过头（本函数的早期版本：空城市返回 `False`）→ **拦住一个本来能跑的场景**，
+          用户明明能用却收到"覆盖不到"。实测代价：当场红 4 个 `agent_step` 测试（2026-09-17）。
+        · 宽松过头 → 退回"能进循环但每次搜都是空"的白等，也就是 D67-B 要消掉的东西。
+        """
+        return True if not city else MOCK_CITY in str(city)
+
     def __init__(self, today: date | None = None) -> None:
         # `today` 可注入 —— 让测试能固定"今天"，否则跑一段时间后
         # 天气断言会因为真实日期推进而失效（这类测试是最难查的）

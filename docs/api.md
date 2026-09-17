@@ -157,14 +157,16 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJ1aWQiOjF9.xxx
 `msg` 是给人看的中文，会改；`code` 是给机器判别的，改了就是我们违约。
 前端需要自定义文案时，**按 `code` 查自己的文案表**。
 
-### 1.4 mock 模式：前端无感知
+### 1.4 数据源档位：前端无感知
 
-后端 `.env` 里 `AMAP_PROVIDER=mock` 时，**接口路径、请求体、响应结构完全不变**，
-只有「数据是不是真的」变了。所以：
+后端 `.env` 里 `AMAP_PROVIDER=real|mock`（**默认 `real`**）时，
+**接口路径、请求体、响应结构完全不变**，只有「数据是不是真的」变了。所以：
 
-- 豆包**不用等后端写完**，M1 一完成就能开工
 - 前端**不需要写任何 `if (mockMode)` 分支** —— 有分支就说明契约没冻结
-- 判断当前是不是 mock：`GET /health` 的 `mock_mode`
+- 判断当前生效档：`GET /health` 的 `mock_mode`
+- ⚠️ 配 `real` 但缺 `AMAP_WEBSERVICE_KEY` 时后端**不会报错**，而是启动日志警告 +
+  降级为 mock。这时 `mock_mode=true` **且** `amap_degraded=true` ——
+  **看到 `amap_degraded=true` 就知道「配的是真数据、实际在跑演示数据」**（D66）
 
 ### 1.5 重试 / 限流 / 上传 —— 前端要做什么，不要做什么
 
@@ -237,7 +239,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJ1aWQiOjF9.xxx
 
 | 方法 | 路径 | 阶段 | 说明 |
 |---|---|---|---|
-| GET | `/health` | **M1** 🟢 | 联调探活。`{ok, mock_mode, model_tool, model_plan, amap_configured}` |
+| GET | `/health` | **M1** 🟢 | 联调探活。`{ok, mock_mode, model_tool, model_plan, amap_configured, amap_provider_requested, amap_degraded}` —— 后两个是 D66 加的：`amap_degraded=true` 表示「配了 real 但缺 Key，实际在跑 mock」 |
 
 ### 2.2 会话与对话
 

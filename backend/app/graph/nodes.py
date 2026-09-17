@@ -180,6 +180,26 @@ PLAN_JSON_REMINDER = """输出格式（严格遵守，字段名一个都不能�
 # ══════════════════════════════════════════════════════════════
 
 
+def _no_coverage_error(provider_name: str, destination: str | None) -> str:
+    """数据源覆盖不到目的地时的**人话**报错（D67）。
+
+    ⚠️ 这段话是给**用户**看的，所以必须回答三件事：哪座城市、为什么不行、怎么办。
+
+    旧文案是"这一轮模型没有成功调用过 search_poi" —— 它把
+    「调了 9 次、每次数据源都返回空」也说成「模型没调过」，
+    **作者本人被它误导过**（第一反应是"我不是该调高德吗"）。
+    一次误导的成本就高于改这段话的成本。
+    """
+    where = destination or "这个目的地"
+    if provider_name == "mock":
+        return (
+            f"当前用的是内置演示数据，它只有成都的地点和天气，覆盖不到「{where}」。"
+            f"两条出路：① 目的地换成成都；"
+            f"② 配好 AMAP_WEBSERVICE_KEY（高德「Web服务」那把 Key）并重启后端，走真实高德数据。"
+        )
+    return f"当前数据源（{provider_name}）覆盖不到「{where}」，无法生成行程。"
+
+
 def _pool_from_state(state: dict[str, Any]) -> PoiPool:
     """从 state 的快照重建 POI 池。
 
@@ -433,6 +453,21 @@ class Nodes:
             update["messages"] = [*fresh, AIMessage(content=FORCE_STOP_TEXT)]
             return update
 
+        # ── ②.5 守卫：数据源覆盖不到，就别进工具循环（D67-B）──
+        # 与上面那道守卫**同构**，而且必须在同一层：`after_agent` 只看
+        # "最后一条 AI 消息有没有 tool_calls"，这里回一条**纯文本**，
+        # 条件边自然导向 `generate_plan`（那里会把同一个原因再报一次）。
+        # 拦在这里的理由：进了循环就会派子代理反复空搜 —— 实测非成都目的地
+        # 白等 **159s**（其中 ≈100s 花在 7 次注定为空的搜索）才报错，
+        # 而这些时间是 100% 可预知地浪费。
+        # 判据由 provider 自述（`covers`）：real 档恒为 True → 切真数据后本守卫**自动失效**。
+        destination = (state.get("requirements") or {}).get("destination")
+        if not self.provider.covers(destination):
+            text = _no_coverage_error(self.provider.name, destination)
+            update["messages"] = [*fresh, AIMessage(content=text)]
+            update["error"] = text
+            return update
+
         # ── ③ 调模型 ──
         history = list(state.get("messages") or [])
         try:
@@ -576,10 +611,19 @@ class Nodes:
         """
         pool = _pool_from_state(state)
         if len(pool) == 0:
+            # 池空有**两种成因**，必须分开说（D67-A）：
+            #   ① 数据源覆盖不到这个目的地 → 说清是数据源的限制（并给出出路）
+            #   ② 覆盖得到，但模型这轮没调 / 调的词都搜不到 → 说模型侧的问题
+            # 旧文案把两者混成一句"模型没有成功调用过 search_poi"，
+            # 于是①看起来像"模型偷懒"，误导排查方向。
+            destination = (state.get("requirements") or {}).get("destination")
+            if not self.provider.covers(destination):
+                return {"error": _no_coverage_error(self.provider.name, destination)}
             return {
                 "error": (
-                    "候选池是空的 —— 这一轮模型没有成功调用过 search_poi，"
-                    "无法在封闭世界内生成行程。"
+                    "候选池是空的 —— 模型这一轮没有成功调用过 search_poi"
+                    "（一次都没调，或调了但每一次都是空结果）。"
+                    f"数据源 {self.provider.name}，目的地「{destination or '未提供'}」。"
                 )
             }
 

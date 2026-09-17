@@ -380,3 +380,21 @@ def test_describe_advertises_mock_mode(provider: MockAmapProvider) -> None:
     assert "Mock" in text
     assert "POI" in text
     assert str(TODAY) in text
+
+
+def test_covers_matches_the_search_filter(provider: MockAmapProvider) -> None:
+    """`covers` 必须与 `search_poi` 的城市过滤**逐字对齐**（D67-B）。
+
+    这两处不一致会造出两种错，而且**都不报错**：
+    · 保守过头 → 拦住一个本来能跑的场景（用户明明能用，却收到"覆盖不到"）
+    · 宽松过头 → 退回"能进工具循环、但每次搜都是空"的白等，也就是 D67-B 要消掉的东西
+
+    ⚠️ 保守过头不是假设：本函数的早期版本让**空城市返回 `False`**，
+    当场红掉 4 个 `agent_step` 测试（2026-09-17）。
+    """
+    assert provider.covers("成都") is True
+    assert provider.covers("成都市") is True, "搜「成都」能命中，判覆盖也必须命中"
+    assert provider.covers("杭州") is False
+    # 没给城市时**不拦** —— 这时 `search_poi`（判据写的是 `if city and ...`）会照常搜池子
+    assert provider.covers(None) is True
+    assert provider.covers("") is True

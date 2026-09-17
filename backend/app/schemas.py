@@ -978,9 +978,17 @@ class HealthResponse(BaseModel):
 
     ok: bool
     mock_mode: bool
+    """**生效档**是不是 mock。⚠️ 它与 `amap_provider_requested` 不是一回事。"""
     model_tool: str
     model_plan: str
     amap_configured: bool
+    """`.env` 里配了高德 Key 没有。⚠️ **配了也可能没生效** —— 看 `amap_degraded`。"""
+    amap_provider_requested: str
+    """`.env` 里**写**的档（`mock` / `real`）。"""
+    amap_degraded: bool
+    """是否因缺凭据被**启动期降级**（D66）。
+    `true` = 你配的是 `real`，但实际在跑 `mock` —— 这时任何"看起来不对"的结果
+    都先往这里看一眼，别去翻 `.env`。"""
 
 
 __all__ = [

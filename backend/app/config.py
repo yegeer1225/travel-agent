@@ -158,12 +158,34 @@ class Settings:
     """token 有效期（小时）。默认 7 天 —— 不做 refresh（api.md 第一节定死），
     过期就让用户重登，短得离谱或长得离谱都不好。"""
 
+    # ---- 数据源档位（D66）----
+    amap_provider_requested: str = ""
+    """`.env` 里**写**的档（`mock` / `real`）。空 = 与生效档相同
+    （测试里手工构造 `Settings` 时不用管它）。
+
+    ⚠️ **它与 `amap_provider` 不是一回事**：`amap_provider` 是**生效档**。
+    两者不一致 = 缺凭据被启动期降级了（见 `amap_degraded`）。
+    所有业务判定都看**生效档**；"请求档"只用于告知和诊断。
+    """
+
     # ---- 派生量 ----
     @property
     def mock_mode(self) -> bool:
-        """是不是在跑 mock。`api.md` 1.4 承诺前端**不需要**判断这个，
-        它只用于 `GET /health` 的 `mock_mode` 字段和启动日志。"""
+        """**生效档**是不是 mock（不是"请求档"）。
+
+        `api.md` 1.4 承诺前端**不需要**判断这个，它只用于 `GET /health`
+        和启动日志。⚠️ 它与 `amap_provider_requested` 不一致时 = 缺凭据降级（D66）。
+        """
         return self.amap_provider != "real"
+
+    @property
+    def amap_degraded(self) -> bool:
+        """是否因为缺凭据被**启动期降级**（D66）。`GET /health` 用它一眼看出。
+
+        注意这是"启动期选档"，**不是**运行期换源 —— 后者被 D34 明确禁止。
+        """
+        requested = self.amap_provider_requested or self.amap_provider
+        return requested == "real" and self.amap_provider == "mock"
 
     @property
     def tool_thinking_enabled(self) -> bool:
@@ -205,9 +227,27 @@ class Settings:
 
 
 def _build() -> Settings:
-    provider = _optional("AMAP_PROVIDER", "mock").lower()
-    if provider not in {"mock", "real"}:
-        raise ConfigError(f"AMAP_PROVIDER 只能是 mock 或 real，现在是 {provider!r}")
+    requested = _optional("AMAP_PROVIDER", "real").lower()
+    if requested not in {"mock", "real"}:
+        raise ConfigError(f"AMAP_PROVIDER 只能是 mock 或 real，现在是 {requested!r}")
+
+    # ══ D66：缺凭据时**启动期降级**到 mock ══
+    # 为什么这里允许"降级"、而 D34 又明确禁止"降级"—— 两者不是一回事：
+    #   · **运行期**请求失败后偷偷换源 → 会**混源**（同一份行程里两个数据源的数据），
+    #     破封闭世界、用户也不知道该信谁 → 绝不做（D34）。
+    #   · **启动期**凭据缺失 → 一个进程仍然**只用一个数据源**，不混源。
+    #     这时只有两条路：拒绝启动（clone 的人连后端都起不来），或响亮降级。
+    #     选了后者，但**必须响亮** —— 下面的警告 + `GET /health` 的 `amap_degraded`。
+    amap_key = _optional("AMAP_WEBSERVICE_KEY")
+    provider = requested
+    if requested == "real" and not amap_key:
+        provider = "mock"
+        print(
+            "[config] ⚠️ AMAP_PROVIDER=real 但缺少 AMAP_WEBSERVICE_KEY —— "
+            "已降级为 mock（内置演示数据，只有成都）。\n"
+            "           要真数据：在 .env 填 AMAP_WEBSERVICE_KEY（高德「Web服务」那把 Key）。\n"
+            "           要关掉这条警告：把 AMAP_PROVIDER 显式写成 mock。"
+        )
 
     model_tool = _optional("LLM_MODEL_TOOL", "deepseek-flash")
     model_plan = _optional("LLM_MODEL_PLAN", "deepseek-flash")
@@ -246,12 +286,10 @@ def _build() -> Settings:
         jwt_secret=_optional("JWT_SECRET"),
         auth_token_ttl_hours=int(_optional("AUTH_TOKEN_TTL_HOURS", "168")),
         amap_provider=provider,
-        # ⚠️ mock 模式下不校验高德 Key：M1 阶段（以及豆包并行开工时）不需要真 Key
-        amap_webservice_key=(
-            _require("AMAP_WEBSERVICE_KEY")
-            if provider == "real"
-            else _optional("AMAP_WEBSERVICE_KEY")
-        ),
+        amap_provider_requested=requested,
+        # ⚠️ mock（含降级后的 mock）不强制要求高德 Key：M1、豆包并行开工、
+        # 以及"没配 Key 的人 clone 下来"这三种场景都不该因此起不来（D66）
+        amap_webservice_key=amap_key,
         mysql_host=_optional("MYSQL_HOST", "127.0.0.1"),
         mysql_port=int(_optional("MYSQL_PORT", "3306")),
         mysql_user=_optional("MYSQL_USER", "travel"),
