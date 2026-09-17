@@ -80,8 +80,9 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJ1aWQiOjF9.xxx
 
 要这么做：
 
-1. `api.ts` 的 `handleUnauthorized()` **不再 `navigate('/login')`**，
+1. `lib/auth.ts` 的 `handleUnauthorized()` **不再 `window.location.assign('/login')`**，
    改为**打开一个全局登录弹窗**：当前页留在下层，**不卸载、不清滚动位置**
+   （⚠️ 现在是 `window.location.assign` —— **整页刷新**，比 SPA 跳页丢得更多）
 2. 登录成功后 **自动重放刚才失败的那个请求** —— 用户看到的是"登录完，景点详情自己出来了"
 3. 重放**只做一次**。再 401 说明 token 有问题：弹窗里显示错误，不再重放（防死循环）
 4. **重放只对 `GET` 生效**。`POST/PATCH/DELETE` 401 后**不自动重放** ——
