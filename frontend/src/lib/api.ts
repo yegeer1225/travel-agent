@@ -39,7 +39,7 @@ import type {
   FavoriteItem,
   TargetType,
 } from '../types/contract'
-import { handleUnauthorized, getToken } from './auth'
+import { handleUnauthorized, waitForLogin, getToken } from './auth'
 
 export class ApiError extends Error {
   readonly code: string
@@ -59,7 +59,8 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+/** 原始请求（一行逻辑别动）：401 → handleUnauthorized() 清 token 开弹窗 */
+async function _raw<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(`/api${path}`, {
     ...init,
     headers: {
@@ -79,6 +80,24 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw err
   }
   return res.status === 204 ? (undefined as T) : res.json()
+}
+
+/**
+ * 带 401 重放的请求（api.md 1.1.3 / 交接文档 15.9）：
+ * - 401 + GET → 透明挂起等登录弹窗，登录成功后重放**一次**（调用方无感知）
+ * - 401 + 非 GET → 直接抛（写操作不重放，防重复提交）
+ * - 重放再 401 → 抛错（不循环）
+ */
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  try {
+    return await _raw<T>(path, init)
+  } catch (e) {
+    const is401 = e instanceof ApiError && e.code === 'unauthorized'
+    const isGet = !init.method || init.method.toUpperCase() === 'GET'
+    if (!is401 || !isGet) throw e // 🔴 只重放 GET（api.md 1.1.3 第 4 条）
+    await waitForLogin() // 挂起等弹窗登录；取消 → reject
+    return await _raw<T>(path, init) // 重放一次，再失败就抛（不循环）
+  }
 }
 
 function post<T>(path: string, body: unknown): Promise<T> {

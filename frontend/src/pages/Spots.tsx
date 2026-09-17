@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { useLocation, useSearchParams } from 'react-router-dom'
 import type { SpotCard } from '../types/contract'
 import { addFavorite, searchSpots, ApiError } from '../lib/api'
 import { getToken } from '../lib/auth'
@@ -76,19 +76,23 @@ export default function Spots() {
   // 登录后跳回本页（路由变化）→ 重渲染 → hasToken 重新求值（P3：不再只算一次）
   useLocation()
   const hasToken = !!getToken()
-  const [keyword, setKeyword] = useState('')
+  const [searchParams] = useSearchParams()
+  const urlKw = searchParams.get('kw') ?? '' // 导航栏搜索框带过来的词（15.3）
+  const [keyword, setKeyword] = useState(urlKw)
   const [city, setCity] = useState('')
   const [items, setItems] = useState<SpotCard[] | null>(null)
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [meta, setMeta] = useState<{ source: string; cached: boolean } | null>(null)
+  // 请求序列保护：自动搜索（URL 参数）与手动搜索并发时，只认最后一次发出的（过期响应丢弃）
+  const seqRef = useRef(0)
 
-  const doSearch = async (e?: React.FormEvent) => {
-    e?.preventDefault()
-    const kw = keyword.trim()
+  const runSearch = async (kw: string, cityName: string) => {
+    const seq = ++seqRef.current
+    const k = kw.trim()
     // 🔴 关键词为空时不要发请求（后端会返回 400 keyword_required）
-    if (kw === '') {
+    if (k === '') {
       setItems(null)
       setError(null)
       return
@@ -96,11 +100,13 @@ export default function Spots() {
     setLoading(true)
     setError(null)
     try {
-      const res = await searchSpots(kw, city.trim() === '' ? undefined : city.trim())
+      const res = await searchSpots(k, cityName.trim() === '' ? undefined : cityName.trim())
+      if (seq !== seqRef.current) return // 已被更新的搜索取代，丢弃过期响应
       setItems(res.items)
       setTotal(res.total)
       setMeta({ source: res.source, cached: res.cached })
     } catch (err) {
+      if (seq !== seqRef.current) return
       if (err instanceof ApiError && err.code === 'rate_limited') {
         setError(`操作太频繁，请 ${err.retryAfter ?? 60} 秒后重试`)
       } else {
@@ -108,9 +114,23 @@ export default function Spots() {
       }
       setItems(null)
     } finally {
-      setLoading(false)
+      if (seq === seqRef.current) setLoading(false)
     }
   }
+
+  const doSearch = (e?: React.FormEvent) => {
+    e?.preventDefault()
+    void runSearch(keyword, city)
+  }
+
+  // 导航栏带词跳入：灌进输入框 + 自动搜一次（依赖 urlKw，用户手动搜索不触发，互不打架）
+  useEffect(() => {
+    if (urlKw) {
+      setKeyword(urlKw)
+      void runSearch(urlKw, '')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlKw])
 
   return (
     <div className="relative px-14 py-10">
