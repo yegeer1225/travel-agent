@@ -176,6 +176,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJ1aWQiOjF9.xxx
 | POST | `/trips/{id}/recheck` | M7 🟢 | 深度软校验（**只有它调 LLM**）→ `RecheckResponse` |
 | POST | `/trips/{id}/amap-import` | M7 🔵 | 高德 APP 唤端链接 → `AmapImportResponse` |
 | POST | `/trips/paste` | **M7** 🟢 | **SSE**。热启动：粘一段行程 → 校验 → 出总览（**不建会话**） |
+| POST | `/trips/{id}/publish-as-guide` | **M12** 🟢 | **行程 → 攻略**（`A46`）：渲染成公开攻略 → `GuideDetail`。可选头 `Idempotency-Key`，详见 3.8 |
 
 ### 2.4 景点
 
@@ -194,7 +195,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJ1aWQiOjF9.xxx
 
 | 方法 | 路径 | 阶段 | 说明 |
 |---|---|---|---|
-| GET | `/guides?city=&keywords=&mine=` | M10 🟡 | 列表。默认**只返回 public**；`mine=1` 返回自己的全部 → `Page<GuideListItem>` |
+| GET | `/guides?city=&keywords=&mine=&source_trip_id=` | M10/M12 🟡 | 列表。默认**只返回 public**；`mine=1` 返回自己的全部；**`source_trip_id=<行程id>` 返回"我在这条行程下发过的"**（隐含只看自己，匿名 `401`；发布前确认框的判据，见 3.8）→ `Page<GuideListItem>` |
 | POST | `/guides` | M10 🟢 | 创建（**默认 `private`**）。body `GuideUpsertRequest` → `GuideDetail` |
 | GET | `/guides/{id}` | M10 🟢 | 详情 → `GuideDetail`（public 直通；private 才校验归属） |
 | PATCH | `/guides/{id}` | M10 🟢 | 改（只传要改的字段）→ `GuideDetail` |
@@ -493,6 +494,62 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 | **React 19 严格模式 `useEffect` 跑两次** | SSE 连两次 → agent 跑两遍 → **DeepSeek 扣两次钱** | effect 里 `const ac = new AbortController()`，**`return () => ac.abort()`** |
 | **Vite dev proxy 缓冲 SSE** | 事件憋到最后一起吐，看起来像"卡住然后刷屏" | proxy 配置里**不要开压缩**；dev 时确认真的是逐条到 |
 | **`EventSource` 只能 GET** | 用 `EventSource` 根本发不出聊天请求 | 用上面的 `fetch` + `ReadableStream`，**永远不要用 `EventSource`** |
+
+---
+
+### 3.8 `POST /trips/{id}/publish-as-guide` —— 行程 → 攻略（M12 · `A46`）
+
+把一条**已有的行程**渲染成攻略。**正文由后端从行程渲染，这份请求不收正文。**
+
+**请求体**（整体可省）
+
+```json
+{ "title": "成都两日 · 古迹与熊猫", "destination": "成都" }
+```
+
+两个字段都可省 —— 省略时用行程自己的值。`title` 超 100 字会被后端截断（`guides.title` 列宽 100，而 `trips.title` 是 200）。
+
+**可选头 `Idempotency-Key`**
+
+| 情况 | 行为 |
+|---|---|
+| 没带 | 照常新建一篇（curl / 脚本不必造 key） |
+| 带了 · 首次到达 | 新建一篇，把 key 一起存下 |
+| 带了 · 同 `(user_id, key)` 已存在 | **返回原来那一篇，不新建也不报错**（HTTP 仍是 201） |
+| 超过 64 字符 | `400 invalid_param` |
+
+**key 的粒度是「一次点击意图」，不是「一条行程」** —— 这条是契约，前端必须照做：
+
+> 在**每次用户触发发布的 click handler 内**生成一个新 uuid 放进 `Idempotency-Key`；
+> 该次意图的**所有重试必须沿用同一个 uuid**；请求结束后作废。
+>
+> ❌ 禁止在组件渲染体里生成（每次重渲染 key 都变，"重试"会被当成"新意图"）
+> ❌ 禁止每次重试重新生成（等于没做幂等）
+> ✅ 请求进行中必须 `disabled` 按钮 —— 那挡的是**双击**，而**双击不属于幂等键的职责**：
+> 两次 click 会生成两个 key，只能在 UI 层拦
+
+为什么这样切：后端看两个请求长得一模一样（同用户、同行程、同 body），**没有任何信息**能区分"网络重试"和"我又想发一篇"。判定权只能在客户端 —— 同 key = 重试（返回原篇），新 key = 有意再发（照常新建）。**后端只执行"同 key 同结果"，不猜意图。**
+
+**响应** `GuideDetail`（201）。要点：
+
+- `visibility` 恒为 `public`、`published_at` 已写 —— 这个端点**没有草稿分支**（`D63`）
+- `source_trip_id` = 源行程 id，**只溯源、没有唯一约束**：同一行程允许发多篇（同一个地方可以有多个行程方案）
+- `cover` 取**首站**的高德照片；**拿不到就是 `null`**，绝不会因此让发布失败
+- `content_md` 里**不含 `checks`** —— 攻略给人看，不是校验报告
+- `poi_ids` = 全行程去重后的 poi_id 列表
+
+**错误**：行程不存在或不属于你 → `404 not_found`（与全局 404 语义一致，**不区分"不存在"和"不是你的"**）；限流 → `429`（60 / 小时）。
+
+**发布前的确认框（前端必须做，见 `D62`）**
+
+点"发布为攻略"时**先打一次** `GET /guides?source_trip_id=<trip_id>`：
+
+- 返回 0 篇 → 直接发
+- 返回 N 篇 → 弹确认框（列出最近一篇的标题与时间 + "再发一篇"），用户确认后才发
+
+⚠️ **判据必须每次点击现查，不能用页面加载时缓存的本地状态** —— 本地状态一定会过期（别的标签页发过、自己发过又忘了），过期时弹窗会谎报"没发过"，这个兜底就白做了。
+
+**互转的另一半**：攻略 → 路线走 `POST /trips/paste`（把 `content_md` 喂进去即可，**后端零改动**）。
 
 ---
 

@@ -87,6 +87,14 @@ AUTH_PER_MIN = Rule("auth_ip", 10, 60, "ip")
 """`/auth/register`·`login`：10 / 分钟，按 **IP**（攻击者还没有账号）。"""
 AVATAR_HOURLY = Rule("avatar_hourly", 5, 3600, "user")
 """`POST /users/me/avatar`：5 / 小时。"""
+PUBLISH_HOURLY = Rule("publish_hourly", 60, 3600, "user")
+"""`POST /trips/{id}/publish-as-guide`：60 / 小时（D61）。
+
+**不是因为它贵**（这个端点零 LLM、零高德，只读行程 + 渲染 + 写库），
+而是因为它的副作用**外溢到社区**：没有上限时，脚本能一次性把自己的行程
+全刷成公开攻略刷满「发现」列表。正常用户一小时发不了 60 篇 ——
+这个数字只挡脚本和手滑，不挡真人。
+"""
 GLOBAL_IP = Rule("global_ip", 300, 60, "ip")
 """全局兜底：300 / 分钟 · IP。挂在**整个 API 路由**上，防单机脚本。"""
 

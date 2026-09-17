@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.schemas import ChatMessage, MessageMeta, MessageRole, Session, Trip, TripSummaryItem
-from app.store.repo import DEFAULT_SESSION_TITLE, UserRecord
+from app.store.repo import DEFAULT_SESSION_TITLE, DuplicateIdempotencyKeyError, UserRecord
 
 
 def _now() -> datetime:
@@ -239,13 +239,25 @@ class InMemoryGuideStore:
         destination: str | None = None,
         cover: str | None = None,
         poi_ids: list[str] | None = None,
+        source_trip_id: str | None = None,
+        idempotency_key: str | None = None,
+        publish: bool = False,
     ) -> dict[str, Any]:
+        if idempotency_key is not None and any(
+            r["user_id"] == user_id and r["idempotency_key"] == idempotency_key
+            for r in self._rows.values()
+        ):
+            # 与真库 uq_guides_idem 同语义：同 (user_id, key) 不许有两条
+            raise DuplicateIdempotencyKeyError("uq_guides_idem (in-memory)")
         now = _now()
         gid = uuid.uuid4().hex
         rec = {
             "id": gid, "user_id": user_id, "title": title, "content_md": content_md,
             "destination": destination, "cover": cover, "poi_ids": list(poi_ids or []),
-            "visibility": "private", "published_at": None, "created_at": now, "updated_at": now,
+            "visibility": "public" if publish else "private",
+            "published_at": now if publish else None,
+            "source_trip_id": source_trip_id, "idempotency_key": idempotency_key,
+            "created_at": now, "updated_at": now,
         }
         self._rows[gid] = rec
         return dict(rec)
@@ -284,6 +296,24 @@ class InMemoryGuideStore:
 
     def list_mine(self, user_id: int, *, limit: int = 20, offset: int = 0) -> tuple[list[dict[str, Any]], int]:
         rows = [r for r in self._rows.values() if r["user_id"] == user_id]
+        rows.sort(key=lambda r: r["created_at"], reverse=True)
+        return [self._copy(r) for r in rows[offset : offset + limit]], len(rows)
+
+    def find_by_idempotency(self, user_id: int, idempotency_key: str) -> dict[str, Any] | None:
+        """幂等命中（D61）—— 与 GuideRepo.find_by_idempotency 同签名。"""
+        for r in self._rows.values():
+            if r["user_id"] == user_id and r["idempotency_key"] == idempotency_key:
+                return self._copy(r)
+        return None
+
+    def list_by_source_trip(
+        self, user_id: int, source_trip_id: str, *, limit: int = 20, offset: int = 0
+    ) -> tuple[list[dict[str, Any]], int]:
+        """「我在这条行程下发布过几篇」（D62 弹窗判据）—— 与 GuideRepo 同签名。"""
+        rows = [
+            r for r in self._rows.values()
+            if r["user_id"] == user_id and r["source_trip_id"] == source_trip_id
+        ]
         rows.sort(key=lambda r: r["created_at"], reverse=True)
         return [self._copy(r) for r in rows[offset : offset + limit]], len(rows)
 

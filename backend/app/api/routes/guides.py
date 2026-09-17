@@ -21,6 +21,7 @@ from app.api.deps import (
     get_user_repo,
 )
 from app.api.errors import AppError
+from app.api.views import attach_counts, guide_detail_view
 from app.api.security import decode_token, parse_bearer
 from app.schemas import (
     CommentCreateRequest,
@@ -51,64 +52,6 @@ def _optional_user_id(request: Request) -> int | None:
         return None
 
 
-def _summary_of(content_md: str) -> str:
-    """正文前 80 字，**后端截**（前端截会出现半句话 + 一堆换行）。"""
-    text = " ".join(content_md.split())
-    return text[:80]
-
-
-def _guide_list_item(rec, *, author_name: str, like_count: int, comment_count: int) -> GuideListItem:
-    return GuideListItem(
-        guide_id=rec["id"] if isinstance(rec, dict) else rec.id,
-        title=rec["title"] if isinstance(rec, dict) else rec.title,
-        summary=_summary_of(rec["content_md"] if isinstance(rec, dict) else rec.content_md),
-        destination=rec["destination"] if isinstance(rec, dict) else rec.destination,
-        cover=rec["cover"] if isinstance(rec, dict) else rec.cover,
-        author_name=author_name,
-        author_type="user",
-        visibility=rec["visibility"] if isinstance(rec, dict) else rec.visibility,
-        like_count=like_count,
-        comment_count=comment_count,
-        published_at=rec["published_at"] if isinstance(rec, dict) else rec.published_at,
-        created_at=rec["created_at"] if isinstance(rec, dict) else rec.created_at,
-    )
-
-
-def _attach_counts(
-    recs: list,
-    user_id: int | None,
-    guide_repo,
-    like_repo,
-    comment_repo,
-    user_repo,
-) -> list[GuideListItem]:
-    """列表页批量拼装：作者名 + 点赞/评论数（批量 COUNT，不 N+1 到没法看）。"""
-    ids = [r["id"] if isinstance(r, dict) else r.id for r in recs]
-    like_map = like_repo.counts(TargetType.GUIDE.value, ids)
-    comment_map = comment_repo.counts(TargetType.GUIDE.value, ids)
-    author_cache: dict[int, str] = {}
-
-    def _author(uid: int) -> str:
-        if uid not in author_cache:
-            u = user_repo.get_by_id(uid)
-            author_cache[uid] = (u.nickname or u.username) if u else f"用户{uid}"
-        return author_cache[uid]
-
-    items: list[GuideListItem] = []
-    for r in recs:
-        is_dict = isinstance(r, dict)
-        gid = r["id"] if is_dict else r.id
-        uid = r["user_id"] if is_dict else r.user_id
-        items.append(
-            _guide_list_item(
-                r,
-                author_name=_author(uid),
-                like_count=like_map.get(gid, 0),
-                comment_count=comment_map.get(gid, 0),
-            )
-        )
-    return items
-
 
 def _check_guide_visible(rec, user_id: int | None) -> None:
     """public 直通；private 只有本人能看（其余 404，不泄露存在性）。"""
@@ -131,11 +74,21 @@ def list_guides(
     city: str | None = Query(default=None),
     keywords: str | None = Query(default=None),
     mine: int = Query(default=0, ge=0, le=1),
+    source_trip_id: str | None = Query(default=None, max_length=36),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ) -> Page[GuideListItem]:
     user_id = _optional_user_id(request)
-    if mine:
+    if source_trip_id:
+        # D62：发布前弹窗的判据（"我在这条行程下发过几篇"）。
+        # **强制登录 + 只查自己的** —— 这个答案只可能是"我的"；别人的攻略
+        # （哪怕 public）混进来，用户会看到"已发布 3 篇"却一篇都不是自己的。
+        if user_id is None:
+            raise AppError("unauthorized", "请先登录", 401)
+        recs, total = guide_repo.list_by_source_trip(
+            user_id, source_trip_id, limit=limit, offset=offset
+        )
+    elif mine:
         if user_id is None:
             # mine=1 是"我的攻略"，匿名没有"我的" —— 401 而不是空列表（前端该跳登录）
             raise AppError("unauthorized", "请先登录", 401)
@@ -143,7 +96,7 @@ def list_guides(
     else:
         recs, total = guide_repo.list_public(city=city, keywords=keywords, limit=limit, offset=offset)
     return Page[GuideListItem](
-        items=_attach_counts(recs, user_id, guide_repo, like_repo, comment_repo, user_repo),
+        items=attach_counts(recs, user_id, like_repo, comment_repo, user_repo),
         total=total,
         limit=limit,
         offset=offset,
@@ -169,27 +122,9 @@ def create_guide(
         cover=body.cover,
         poi_ids=body.poi_ids,
     )
-    return _guide_detail(rec, user_id, guide_repo, like_repo, comment_repo, user_repo)
+    return guide_detail_view(rec, user_id, like_repo, comment_repo, user_repo)
 
 
-def _guide_detail(rec, user_id: int | None, guide_repo, like_repo, comment_repo, user_repo) -> GuideDetail:
-    gid = rec["id"] if isinstance(rec, dict) else rec.id
-    owner = rec["user_id"] if isinstance(rec, dict) else rec.user_id
-    u = user_repo.get_by_id(owner)
-    liked, like_count = like_repo.state(user_id or 0, TargetType.GUIDE.value, gid)
-    comment_count = comment_repo.counts(TargetType.GUIDE.value, [gid]).get(gid, 0)
-    base = _guide_list_item(
-        rec,
-        author_name=(u.nickname or u.username) if u else f"用户{owner}",
-        like_count=like_count,
-        comment_count=comment_count,
-    )
-    return GuideDetail(
-        **base.model_dump(),
-        content_md=rec["content_md"] if isinstance(rec, dict) else rec.content_md,
-        poi_ids=rec["poi_ids"] if isinstance(rec, dict) else rec.poi_ids,
-        liked=liked,
-    )
 
 
 @router.get("/guides/{guide_id}", response_model=GuideDetail)
@@ -206,7 +141,7 @@ def get_guide(
     if rec is None:
         raise AppError("not_found", "攻略不存在", 404)
     _check_guide_visible(rec, user_id)
-    return _guide_detail(rec, user_id, guide_repo, like_repo, comment_repo, user_repo)
+    return guide_detail_view(rec, user_id, like_repo, comment_repo, user_repo)
 
 
 @router.patch("/guides/{guide_id}", response_model=GuideDetail)
@@ -224,7 +159,7 @@ def update_guide(
     rec = guide_repo.update(user_id, guide_id, fields)
     if rec is None:
         raise AppError("not_found", "攻略不存在", 404)
-    return _guide_detail(rec, user_id, guide_repo, like_repo, comment_repo, user_repo)
+    return guide_detail_view(rec, user_id, like_repo, comment_repo, user_repo)
 
 
 @router.post("/guides/{guide_id}/publish", response_model=GuideDetail)
@@ -239,7 +174,7 @@ def publish_guide(
     rec = guide_repo.set_visibility(user_id, guide_id, "public")
     if rec is None:
         raise AppError("not_found", "攻略不存在", 404)
-    return _guide_detail(rec, user_id, guide_repo, like_repo, comment_repo, user_repo)
+    return guide_detail_view(rec, user_id, like_repo, comment_repo, user_repo)
 
 
 @router.post("/guides/{guide_id}/unpublish", response_model=GuideDetail)
@@ -254,7 +189,7 @@ def unpublish_guide(
     rec = guide_repo.set_visibility(user_id, guide_id, "private")
     if rec is None:
         raise AppError("not_found", "攻略不存在", 404)
-    return _guide_detail(rec, user_id, guide_repo, like_repo, comment_repo, user_repo)
+    return guide_detail_view(rec, user_id, like_repo, comment_repo, user_repo)
 
 
 @router.delete("/guides/{guide_id}", status_code=204)

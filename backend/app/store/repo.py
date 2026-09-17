@@ -34,6 +34,8 @@ import pymysql
 import pymysql.connections
 import pymysql.cursors
 
+from pymysql.err import IntegrityError as MysqlIntegrityError
+
 from app.schemas import (
     ChatMessage,
     MessageMeta,
@@ -380,6 +382,16 @@ class UserRepo:
 # ══════════════════════════════════════════════════════════════
 
 
+class DuplicateIdempotencyKeyError(Exception):
+    """幂等键撞唯一约束 `uq_guides_idem`（D61）。
+
+    为什么单独造一个异常：真库抛的是 `pymysql.err.IntegrityError`，而内存替身
+    没有驱动可抛 —— 两边都翻成这一个类型，**路由层就只需 catch 一种**，
+    不必知道底层是 MySQL 还是内存。顺带避开"catch 所有 IntegrityError"那个坑
+    （别的完整性问题会被误当幂等冲突吞掉）。
+    """
+
+
 @dataclass
 class GuideRecord:
     id: str
@@ -393,6 +405,8 @@ class GuideRecord:
     published_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    source_trip_id: str | None = None  # 由哪条行程发布而来（D61）；**只溯源，不加唯一约束**
+    idempotency_key: str | None = None  # 那次"发布意图"的身份证（D61）；None = 没带头
 
 
 class GuideRepo:
@@ -418,9 +432,14 @@ class GuideRepo:
             visibility=row["visibility"], published_at=aware(row["published_at"]),
             created_at=aware(row["created_at"]) or utc_now(),
             updated_at=aware(row["updated_at"]) or utc_now(),
+            source_trip_id=row.get("source_trip_id"),
+            idempotency_key=row.get("idempotency_key"),
         )
 
-    _COLS = "id, user_id, title, content_md, destination, cover, poi_ids, visibility, published_at, created_at, updated_at"
+    _COLS = (
+        "id, user_id, title, content_md, destination, cover, poi_ids, visibility, "
+        "published_at, created_at, updated_at, source_trip_id, idempotency_key"
+    )
 
     def create(
         self,
@@ -431,20 +450,42 @@ class GuideRepo:
         destination: str | None = None,
         cover: str | None = None,
         poi_ids: list[str] | None = None,
+        source_trip_id: str | None = None,
+        idempotency_key: str | None = None,
+        publish: bool = False,
     ) -> GuideRecord:
+        """新建攻略。
+
+        `publish=True` → 直接公开（`visibility=public` + `published_at=now`），
+        行程发布端点用它（D63）；其余调用方保持默认 private。
+        `idempotency_key` 撞 `uq_guides_idem` 会抛 `IntegrityError` ——
+        **这一层不吞异常**，由路由层捕获后回查（D61）。
+        """
         now = utc_now()
         gid = uuid.uuid4().hex
+        visibility = "public" if publish else "private"
+        published_at = now if publish else None
         with closing(self._conn_factory()) as conn, conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO guides (id, user_id, title, content_md, destination, cover, poi_ids, visibility, created_at, updated_at) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                (gid, user_id, title, content_md, destination, cover,
-                 json.dumps(poi_ids or []), "private", now, now),
-            )
+            try:
+                cur.execute(
+                    "INSERT INTO guides (id, user_id, title, content_md, destination, cover, poi_ids, "
+                    "visibility, published_at, source_trip_id, idempotency_key, created_at, updated_at) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    (gid, user_id, title, content_md, destination, cover,
+                     json.dumps(poi_ids or []), visibility, published_at,
+                     source_trip_id, idempotency_key, now, now),
+                )
+            except MysqlIntegrityError as exc:
+                # ⚠️ 只翻译幂等键冲突；别的完整性错误必须原样上抛，
+                # 否则"某个 NOT NULL 漏了"会被伪装成"重复发布"。
+                if idempotency_key is not None and "uq_guides_idem" in str(exc):
+                    raise DuplicateIdempotencyKeyError(str(exc)) from exc
+                raise
         return GuideRecord(
             id=gid, user_id=user_id, title=title, content_md=content_md,
             destination=destination, cover=cover, poi_ids=list(poi_ids or []),
-            visibility="private", published_at=None, created_at=now, updated_at=now,
+            visibility=visibility, published_at=published_at, created_at=now, updated_at=now,
+            source_trip_id=source_trip_id, idempotency_key=idempotency_key,
         )
 
     def get(self, guide_id: str) -> GuideRecord | None:
@@ -494,6 +535,43 @@ class GuideRepo:
                 f"SELECT {self._COLS} FROM guides WHERE user_id = %s "
                 "ORDER BY created_at DESC LIMIT %s OFFSET %s",
                 (user_id, limit, offset),
+            )
+            rows = cur.fetchall()
+        return [self._row_to_record(r) for r in rows], total
+
+    def find_by_idempotency(self, user_id: int, idempotency_key: str) -> GuideRecord | None:
+        """幂等命中（D61）：同 `(user_id, key)` 已存在 → 返回那一篇。
+
+        调用点有**两处，缺一不可**：插入**前**查一次（省掉必然失败的 INSERT）、
+        撞唯一键**后**再查一次（并发下两个请求可能同时穿过前一次查）。
+        """
+        with closing(self._conn_factory()) as conn, conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {self._COLS} FROM guides WHERE user_id = %s AND idempotency_key = %s",
+                (user_id, idempotency_key),
+            )
+            row = cur.fetchone()
+        return self._row_to_record(row) if row else None
+
+    def list_by_source_trip(
+        self, user_id: int, source_trip_id: str, *, limit: int = 20, offset: int = 0
+    ) -> tuple[list[GuideRecord], int]:
+        """「我在这条行程下发布过几篇」—— 发布前弹窗的判据（D62）。
+
+        ⚠️ **强制带 user_id**：这个问题的答案只可能是"我的"。别人的攻略
+        （哪怕 public）不该进发布判据 —— 否则用户会看到"已发布 3 篇"却
+        一篇都不是自己的。查询走 `idx_guides_src (user_id, source_trip_id)`。
+        """
+        with closing(self._conn_factory()) as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) AS n FROM guides WHERE user_id = %s AND source_trip_id = %s",
+                (user_id, source_trip_id),
+            )
+            total = int(cur.fetchone()["n"])
+            cur.execute(
+                f"SELECT {self._COLS} FROM guides WHERE user_id = %s AND source_trip_id = %s "
+                "ORDER BY created_at DESC LIMIT %s OFFSET %s",
+                (user_id, source_trip_id, limit, offset),
             )
             rows = cur.fetchall()
         return [self._row_to_record(r) for r in rows], total

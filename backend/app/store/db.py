@@ -104,9 +104,13 @@ _DDL_TABLES: tuple[str, ...] = (
         published_at DATETIME(6)   NULL,
         created_at   DATETIME(6)   NOT NULL,
         updated_at   DATETIME(6)   NOT NULL,
+        source_trip_id  CHAR(36)    NULL,
+        idempotency_key VARCHAR(64) NULL,
         PRIMARY KEY (id),
         KEY idx_guides_user (user_id, created_at DESC),
-        KEY idx_guides_pub (visibility, published_at DESC)
+        KEY idx_guides_pub (visibility, published_at DESC),
+        KEY idx_guides_src (user_id, source_trip_id),
+        UNIQUE KEY uq_guides_idem (user_id, idempotency_key)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     """,
     """
@@ -165,12 +169,29 @@ def connect(settings: Settings) -> pymysql.connections.Connection:
     )
 
 
-_DDL_MIGRATIONS: tuple[tuple[str, str], ...] = (
-    # (判据 SQL 的列名, 迁移语句)。⚠️ CREATE TABLE IF NOT EXISTS **不会**给已存在的
+_DDL_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
+    # (表名, 判据列名, 迁移语句)。⚠️ CREATE TABLE IF NOT EXISTS **不会**给已存在的
     # 表加列 —— 存量库靠这里补。判据查 information_schema，天然幂等。
+    #
+    # ⚠️ 表名必须放在元组里（2026-09-17 修）：此前判据 SQL 把 'sessions' 写死，
+    # 于是从第二条迁移起判据永远查错表 → 每次都判"列不存在" → 重复执行 ALTER →
+    # 第二次 `Duplicate column name` 直接把 init_db 打崩。**加迁移前先读这条**。
     (
+        "sessions",
         "model",
         "ALTER TABLE sessions ADD COLUMN model VARCHAR(40) NULL AFTER title",
+    ),
+    (
+        "guides",
+        "source_trip_id",
+        "ALTER TABLE guides ADD COLUMN source_trip_id CHAR(36) NULL AFTER updated_at, "
+        "ADD KEY idx_guides_src (user_id, source_trip_id)",
+    ),
+    (
+        "guides",
+        "idempotency_key",
+        "ALTER TABLE guides ADD COLUMN idempotency_key VARCHAR(64) NULL AFTER source_trip_id, "
+        "ADD UNIQUE KEY uq_guides_idem (user_id, idempotency_key)",
     ),
 )
 
@@ -195,11 +216,11 @@ def init_db(settings: Settings) -> None:
         with bare.cursor() as cur:
             for ddl in _DDL_TABLES:
                 cur.execute(ddl)
-            for column, ddl in _DDL_MIGRATIONS:
+            for table, column, ddl in _DDL_MIGRATIONS:
                 cur.execute(
                     "SELECT COUNT(*) FROM information_schema.COLUMNS "
-                    "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'sessions' AND COLUMN_NAME = %s",
-                    (settings.mysql_db, column),
+                    "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s AND COLUMN_NAME = %s",
+                    (settings.mysql_db, table, column),
                 )
                 # 裸连接不是 DictCursor，fetchone() 是元组 —— 用下标别用键名
                 if int(cur.fetchone()[0]) == 0:

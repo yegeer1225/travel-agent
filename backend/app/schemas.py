@@ -799,6 +799,15 @@ class GuideListItem(BaseModel):
     published_at: datetime | None = None
     created_at: datetime
 
+    source_trip_id: str | None = None
+    """这条攻略由哪条行程发布而来（D61）。`None` = 手写或脚本播种的，不是发布的。
+
+    用途两条：① 前端可显示"来自行程"并跳回原行程；② `GET /guides?source_trip_id=`
+    的"是否已发布过"判据靠它命中 `idx_guides_src`。
+
+    ⚠️ **它只溯源，不加唯一约束** —— 同一条行程允许发布多篇（同个地方可以有多个
+    行程方案，D61）。"一次请求只生效一次"是另一件事，靠 `idempotency_key`。"""
+
 
 class GuideDetail(GuideListItem):
     model_config = ConfigDict(extra="forbid")
@@ -818,6 +827,23 @@ class GuideUpsertRequest(BaseModel):
     destination: str | None = None
     cover: str | None = None
     poi_ids: list[str] | None = None
+
+
+class PublishGuideFromTripRequest(BaseModel):
+    """把一条**已有的行程**发布成攻略（D61）。**正文由后端渲染，这份请求不收正文。**
+
+    为什么没有 `visibility` / `publish` 字段：这个端点的语义就是"发布"——
+    点它 = 用户想分享，固定 `public` + `published_at=now`，**不做草稿分支**
+    （少一个分支少一组测试）。想先存草稿请走 `POST /guides`（那条默认 private）。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = Field(default=None, min_length=1, max_length=100)
+    """不传就用行程标题；传了就是攻略标题（攻略可以比行程标题更"文章化"）。"""
+
+    destination: str | None = Field(default=None, max_length=100)
+    """不传就用行程目的地。"""
 
 
 class CommentItem(BaseModel):

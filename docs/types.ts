@@ -386,6 +386,7 @@ export interface GuideListItem {
   comment_count: number
   published_at: string | null
   created_at: string
+  source_trip_id: string | null
 }
 
 export interface GuideDetail {
@@ -401,6 +402,7 @@ export interface GuideDetail {
   comment_count: number
   published_at: string | null
   created_at: string
+  source_trip_id: string | null
   content_md: string
   poi_ids: string[]
   liked: boolean
