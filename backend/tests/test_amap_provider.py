@@ -21,11 +21,31 @@ from typing import Any, Callable
 import httpx
 import pytest
 
-from app.providers.amap import AmapError, AmapHttpProvider, _num, _text, parse_poi
+from app.providers.amap import (
+    AmapError,
+    AmapHttpProvider,
+    _num,
+    _text,
+    clear_adcode_cache,
+    parse_poi,
+)
 from app.providers.base import AmapProvider
 from app.schemas import WeatherStatus
 
 FIXTURES = Path(__file__).parent / "fixtures" / "amap"
+
+
+@pytest.fixture(autouse=True)
+def _isolate_adcode_cache():
+    """模块级 adcode 缓存会**跨用例泄漏**（D69）→ 每个用例前后都清空。
+
+    不清的后果是**假绿**：`test_adcode_is_cached_across_calls` 断言
+    `fake.paths.count("/v3/geocode/geo") == 1`，会被别的用例提前填好的
+    "成都市" 缓存变成 0 —— 测试仍然是绿的，但测的已经不是它想测的东西了。
+    """
+    clear_adcode_cache()
+    yield
+    clear_adcode_cache()
 
 
 def load(name: str) -> dict[str, Any]:

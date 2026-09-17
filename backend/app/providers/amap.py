@@ -46,6 +46,33 @@ logger = logging.getLogger(__name__)
 BASE_URL = "https://restapi.amap.com"
 
 # ══════════════════════════════════════════════════════════════
+#  跨请求共享的「外部事实」缓存
+# ══════════════════════════════════════════════════════════════
+
+_ADCODE_CACHE: dict[str, str] = {}
+"""城市名 → adcode。**模块级**（D69），不是实例级。
+
+为什么提上来：`AmapHttpProvider` 是**每请求新建**的
+（`api/chat_stream.py` 每请求建图 → 建 provider）→ 放实例级时命中率恒为 0。
+实测（2026-09-17）：连续建 5 个 provider，每个的 `_adcode_cache` 都是空的。
+
+⚠️ **这个区分很重要**：「哪些缓存能跨请求共享」不能凭感觉定 ——
+· POI 池是「**本次运行**搜到什么」→ **必须按请求隔离**（共享 = 串台，严重 bug）
+· adcode 是「城市名 → 行政区划码」这个**跟本次请求无关的外部事实** → 共享安全
+放错方向的后果差一个量级：池子串台会产出错行程，adcode 最多多查一次（浪费一次配额）。
+"""
+
+
+def clear_adcode_cache() -> None:
+    """清空地理编码缓存。**给测试用**（模块级状态会跨用例泄漏）。
+
+    不清的话，"同一个城市只查一次地理编码"那条断言可能被**别的用例**
+    提前填好的缓存弄成假绿（`fake.paths.count(...)` 变成 0 而不是 1）。
+    """
+    _ADCODE_CACHE.clear()
+
+
+# ══════════════════════════════════════════════════════════════
 #  出站限速
 # ══════════════════════════════════════════════════════════════
 
@@ -288,9 +315,8 @@ class AmapHttpProvider:
         # 退避时长可注入，否则测"重试"要真等 1+2+4 秒（测试会慢到没人愿意跑）
         self._retry_backoff = retry_backoff_s if retry_backoff_s is not None else _RETRY_BACKOFF_S
         self._client: httpx.AsyncClient | None = None
-        self._adcode_cache: dict[str, str] = {}
-        """城市名 → adcode。**这个缓存值得有**：一次行程里同一目的地会被查很多次天气，
-        而地理编码是纯浪费（地名不会在几分钟内变）。"""
+        # adcode 缓存**不在这里** —— 它是模块级的 `_ADCODE_CACHE`（D69）。
+        # 放实例级会漏：provider 每请求新建，缓存每次都从空开始（实测命中率 0）。
 
     # ── HTTP 基座 ──────────────────────────────────────────────
 
@@ -546,7 +572,7 @@ class AmapHttpProvider:
 
         只缓存**成功**的结果：失败的缓存下来会让"先打错字、再改对"永远拿不到数据。
         """
-        cached = self._adcode_cache.get(city)
+        cached = _ADCODE_CACHE.get(city)
         if cached:
             return cached
 
@@ -558,7 +584,7 @@ class AmapHttpProvider:
 
         adcode = _text(geocodes[0].get("adcode"))
         if adcode:
-            self._adcode_cache[city] = adcode
+            _ADCODE_CACHE[city] = adcode
         return adcode
 
 
@@ -567,5 +593,6 @@ __all__ = [
     "AmapHttpProvider",
     "BASE_URL",
     "MIN_INTERVAL_S",
+    "clear_adcode_cache",
     "parse_poi",
 ]
