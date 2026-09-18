@@ -6,12 +6,14 @@ import type {
   CheckEvent,
   SSEEvent,
   MessageMeta,
+  SkeletonEvent,
 } from '../types/contract'
 import { ApiError, createSession, deleteSession, getSession, listSessions } from '../lib/api'
 import { streamSSE, SseInterruptedError } from '../lib/sse'
 import ToolTrajectory, { upsertTrajectory, type TrajectoryEntry } from '../components/ToolTrajectory'
 import CheckCard from '../components/CheckCard'
 import TripCard from '../components/TripCard'
+import SkeletonCard from '../components/SkeletonCard'
 import type { Trip } from '../types/contract'
 
 interface UiMessage {
@@ -39,6 +41,7 @@ export default function Assistant() {
   const [messages, setMessages] = useState<UiMessage[]>([])
   const [trajectory, setTrajectory] = useState<TrajectoryEntry[]>([])
   const [checkEvt, setCheckEvt] = useState<CheckEvent | null>(null)
+  const [skeleton, setSkeleton] = useState<SkeletonEvent | null>(null)
   const [trip, setTrip] = useState<Trip | null>(null)
   const [streaming, setStreaming] = useState(false)
   const [errorBar, setErrorBar] = useState<string | null>(null)
@@ -103,13 +106,19 @@ export default function Assistant() {
       case 'check':
         setCheckEvt(evt)
         break
+      case 'skeleton':
+        // 18 节：骨架先行——只读草排卡，stops 是未验证地名文本，不可进详情
+        setSkeleton(evt)
+        break
       case 'trip':
         setTrip(evt.trip)
+        setSkeleton(null) // 🔴 trip 到达 → 整体替换骨架卡，不合并不追加
         break
       case 'done':
         break // done 只代表成功结束，无需额外状态
       case 'error':
         setErrorBar(evt.msg)
+        setSkeleton(null) // 🔴 只有 error 没有 trip → 骨架卡换成错误提示，不残留
         break
       default:
         break // 未知 type 必须忽略
@@ -122,6 +131,7 @@ export default function Assistant() {
     setErrorBar(null)
     setTrajectory([])
     setCheckEvt(null)
+    setSkeleton(null)
     setTrip(null)
     try {
       const detail = await getSession(sid)
@@ -139,6 +149,7 @@ export default function Assistant() {
     setMessages([])
     setTrajectory([])
     setCheckEvt(null)
+    setSkeleton(null)
     setTrip(null)
     setErrorBar(null)
   }, [])
@@ -196,6 +207,7 @@ export default function Assistant() {
       setTrajectory([])
       countersRef.current = {}
       setCheckEvt(null)
+      setSkeleton(null)
       setTrip(null)
       setStreaming(true)
 
@@ -258,7 +270,13 @@ export default function Assistant() {
     [input, streaming, countdown, currentSessionId, selectedModel, handleEvent, refreshSessions],
   )
 
-  const busyLabel = streaming ? 'AI 处理中…' : countdown !== null ? `${countdown}s 后可发送` : null
+  const busyLabel = streaming
+    ? skeleton
+      ? '精排中…' // 🔴 骨架已在 → loading 别再转空圈（18.3）
+      : 'AI 处理中…'
+    : countdown !== null
+      ? `${countdown}s 后可发送`
+      : null
 
   return (
     <div className="flex flex-1 min-h-0 relative">
@@ -385,7 +403,8 @@ export default function Assistant() {
             </div>
           ))}
 
-          {/* 当前 run 的实时状态：轨迹卡 / 校验卡 / 行程卡 */}
+          {/* 当前 run 的实时状态：骨架卡（最先出现，trip 到达被整体替换）/ 轨迹卡 / 校验卡 / 行程卡 */}
+          {skeleton && <SkeletonCard evt={skeleton} />}
           {trajectory.length > 0 && <ToolTrajectory entries={trajectory} />}
           {checkEvt && <CheckCard checks={checkEvt.checks} round={checkEvt.round} />}
           {trip && (

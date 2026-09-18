@@ -3,6 +3,7 @@ import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import Layout from './layouts/Layout'
 import Home from './pages/Home'
 import Spots from './pages/Spots'
+import SpotDetail from './pages/SpotDetail'
 import Assistant from './pages/Assistant'
 import Overview from './pages/Overview'
 import Guides from './pages/Guides'
@@ -29,6 +30,7 @@ export default function App() {
       <Route element={<Layout />}>
         <Route path="/" element={<Home />} />
         <Route path="/spots" element={<Spots />} />
+        <Route path="/spots/:id" element={<SpotDetail />} />
         <Route path="/guides" element={<Guides />} />
         <Route path="/guides/:id" element={<GuideDetail />} />
         {/* 我的数据页：直接访问引导登录 */}
