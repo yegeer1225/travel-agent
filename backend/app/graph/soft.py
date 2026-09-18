@@ -43,6 +43,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -54,6 +55,10 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.graph.intent import Requirements
 from app.schemas import Check, CheckLevel, CheckStatus, Trip
+
+logger = logging.getLogger(__name__)
+"""软判据是 best-effort：失败不抛、不进 `state["error"]` —— **日志是它唯一的可观测面**。
+没有日志的话，2026-09-18 实测那种"soft_check 0.2 秒结束、0 条软提醒"的静默失败永远查不到根因。"""
 
 # ══════════════════════════════════════════════════════════════
 #  判据清单
@@ -502,6 +507,10 @@ async def run_soft_checks(
         try:
             raw = await llm.bind(response_format={"type": "json_object"}).ainvoke(messages)
         except Exception as exc:  # noqa: BLE001
+            # 🔴 失败必须带堆栈进日志：这里不抛、不写 state["error"]，
+            #    soft_report.error 只有 CLI/评测能看到 —— 用户侧表现是
+            #    "行程正常但一条软提醒都没有"，日志是唯一能钉死根因的地方。
+            logger.error("软判据 LLM 调用失败（best-effort，行程照常输出）", exc_info=True)
             result = apply_soft_findings(trip, [])
             result.error = f"模型调用失败：{type(exc).__name__}: {exc}"
             return result
@@ -523,6 +532,7 @@ async def run_soft_checks(
 
     result = apply_soft_findings(trip, [])
     result.error = f"模型连续 {max_attempts} 次输出都不合格：{last_err}"
+    logger.error("软判据连续不合格（best-effort，行程照常输出）：%s", result.error)
     return result
 
 
