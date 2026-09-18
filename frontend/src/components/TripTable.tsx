@@ -54,7 +54,7 @@ function DraggableStopRow({
         setDropRef(node)
       }}
       className={[
-        'flex items-center gap-3 py-2 border-t border-ink/15 first:border-t-0 text-[13px] group',
+        'flex items-center gap-2 py-2 border-t border-ink/15 first:border-t-0 text-[13px] group',
         isDragging ? 'opacity-30' : '',
         isOver && !dragging ? 'outline outline-2 outline-status-pass -outline-offset-2' : '',
       ].join(' ')}
@@ -72,12 +72,12 @@ function DraggableStopRow({
       <span className="w-6 h-6 shrink-0 flex items-center justify-center bg-ink text-white font-display font-bold text-[12px] rounded-[2px]">
         {stop.seq}
       </span>
-      <span className="font-medium truncate flex-1">{stop.name}</span>
+      <span className="font-medium truncate flex-1" title={stop.name}>{stop.name}</span>
 
       {/* 到达时间（可点编辑） */}
       {editing === 'arrive' ? (
         <input
-          className="w-14 border border-ink rounded-[2px] px-1 text-[12px] outline-none"
+          className="w-12 border border-ink rounded-[2px] px-1 text-[12px] outline-none"
           value={arrive}
           onChange={(e) => setArrive(e.target.value)}
           onBlur={commit}
@@ -86,7 +86,7 @@ function DraggableStopRow({
         />
       ) : (
         <button
-          className="text-muted w-14 text-right shrink-0 hover:text-ink"
+          className="text-muted w-12 text-right shrink-0 hover:text-ink"
           onClick={() => {
             setArrive(stop.arrive ?? '')
             setEditing('arrive')
@@ -100,7 +100,7 @@ function DraggableStopRow({
       {/* 逗留时长（可点编辑） */}
       {editing === 'stay' ? (
         <input
-          className="w-16 border border-ink rounded-[2px] px-1 text-[12px] outline-none"
+          className="w-14 border border-ink rounded-[2px] px-1 text-[12px] outline-none"
           value={stay}
           onChange={(e) => setStay(e.target.value)}
           onBlur={commit}
@@ -109,7 +109,7 @@ function DraggableStopRow({
         />
       ) : (
         <button
-          className="text-muted w-16 text-right shrink-0 hover:text-ink"
+          className="text-muted w-14 text-right shrink-0 hover:text-ink"
           onClick={() => {
             setStay(String(stop.stay_min))
             setEditing('stay')
@@ -120,18 +120,18 @@ function DraggableStopRow({
         </button>
       )}
 
-      <span className="text-muted w-20 text-right shrink-0">
+      <span className="text-muted w-14 text-right shrink-0">
         {stop.from_prev_km > 0 ? `${stop.from_prev_km} km` : '出发地'}
       </span>
 
-      <span className="flex items-center gap-1 shrink-0">
+      <span className="flex items-center gap-0.5 shrink-0">
         {stop.checks.map((c, i) => (
           <CheckBadge key={i} status={c.status} />
         ))}
       </span>
 
       <button
-        className="w-6 h-6 shrink-0 text-muted hover:text-status-fail opacity-0 group-hover:opacity-100 transition-opacity"
+        className="w-5 h-6 shrink-0 text-muted hover:text-status-fail opacity-0 group-hover:opacity-100 transition-opacity"
         onClick={() => onDelete(day, stop.seq)}
         title="删除该站"
       >
@@ -163,7 +163,7 @@ function DayColumn({
     <div
       ref={setNodeRef}
       className={[
-        'border border-ink rounded-[4px] p-3 bg-white',
+        'border border-ink rounded-[4px] p-3 bg-white flex-1 min-w-[440px]',
         isOver && !dragging ? 'outline outline-2 outline-status-pass -outline-offset-2' : '',
       ].join(' ')}
     >
@@ -265,7 +265,7 @@ export default function TripTable({
 
   return (
     <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
-      <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${trip.days.length}, minmax(0,1fr))` }}>
+      <div className="flex gap-4 overflow-x-auto pb-1">
         {trip.days.map((day) => (
           <DayColumn
             key={day.day}
