@@ -494,7 +494,7 @@ data: {"type":"token","text":"成都"}
 | **心跳是 `: ping` 注释行** | 每 15s 一次，防代理超时断流。⚠️ **前端解析必须跳过以 `:` 开头的行** |
 | 流正常结束 vs 断流 | **只有收到 `done` 才算成功**。EOF 而没收到 `done` = 断流 → 提示"连接中断，请重试" |
 
-#### ② 事件表（9 种，对应 `schemas.py` 的 `SSEEventType`）
+#### ② 事件表（10 种，对应 `schemas.py` 的 `SSEEventType`）
 
 | `type` | 何时发 | payload 关键字段 | 前端渲染成什么 |
 |---|---|---|---|
@@ -503,6 +503,7 @@ data: {"type":"token","text":"成都"}
 | `tool_call` | 模型决定调工具 | `call_id` / `tool` / `args` / `label` | 轨迹卡里"正在搜：武侯祠"（`args` 可折叠） |
 | `tool_result` | 工具返回 | `call_id` / `ok` / `summary` / `degraded` | 同一行补结果"找到 3 个候选"；`degraded=true` 加个小标记 |
 | `token` | 最终答复的文本增量 | `text` | **打字机效果**（只在这里） |
+| `skeleton` | 快速骨架生成完（搜索循环开始**前**，D77） | `title` / `days[]`(`day`/`date`/`theme`/`stops`) / `note` | **骨架卡（"先看版"）**：立刻展示每天主题与地名序列，`note` 必须显示；**`trip` 到达后整体替换骨架**（不是合并）。⚠️ `stops` 是未验证地名，**不可渲染成站点卡/不可点进详情** |
 | `check` | 每一轮校验结束 | `round` / `hard_errors` / `soft_warnings` / `checks[]` | **校验卡**（三态分组：通过 / 不通过 / 无法判定） |
 | `trip` | 行程生成/修正完成 | `trip`（完整 `Trip`） | **行程卡**（天数/站数/硬错数 + 「生成路线总览」按钮） |
 | `done` | 流正常结束 | `session_id` / `trip_id` | 结束 loading；`trip_id` 有值才能跳路线总览 |
@@ -514,14 +515,19 @@ data: {"type":"token","text":"成都"}
 session            ← 只有 chat 有
 node    parse_intent  start
 node    parse_intent  end
-node    ask_more      start        ← 必问项缺口 → 到这里就结束（下面不发）
+node    ask_more      start        ← 必问项缺口 → 到这里就结束（不发骨架，D77）
 node    ask_more      end
 token   "成都…"                     ← 提问文本用打字机逐字出
 done
 
-── 用户第二轮 ────────────────────────────────────────────
+── 用户第二轮（补齐日期后） ─────────────────────────────
 session            （恢复会话）
-node    agent_step    start
+node    parse_intent  start
+node    parse_intent  end           ← 需求齐了
+node    make_skeleton start        ← 先快速排骨架（D77）
+node    make_skeleton end
+skeleton {title, days[]}              ← 首结果（~20-30s），界面立刻有东西可看
+node    agent_step    start           ← 后台精排继续（此时用户已在看骨架）
 tool_call  task                        ← M4 起搜索走子 agent（主 agent 无 search_poi）
 tool_result task
 tool_call  get_weather

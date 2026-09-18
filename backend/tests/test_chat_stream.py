@@ -66,6 +66,36 @@ def test_happy_path_emits_full_event_sequence():
     assert final is not None and final.get("trip"), "终态里要有行程"
 
 
+def test_skeleton_event_arrives_before_tool_events():
+    """🔴 D77 首结果延迟：骨架事件必须**先于**任何工具事件到达 ——
+    它存在的意义就是"在搜索循环还在跑的时候先给用户看个框架"。
+    排在 tool_call 之后 = 这个节点白加了。"""
+    events, _ = run(_collect(_happy_nodes()))
+
+    types = _types(events)
+    assert "skeleton" in types, "happy path 必须发骨架事件"
+    skel_idx = types.index("skeleton")
+    first_tool_idx = types.index("tool_call")
+    assert skel_idx < first_tool_idx, f"骨架（第 {skel_idx} 个事件）必须先于工具事件（第 {first_tool_idx} 个）"
+
+    skel = events[skel_idx]
+    assert skel.title and skel.days, "骨架要带标题和天列表"
+    assert skel.note, "必须带'未经验证'提示 —— 这是骨架和正式行程的区别声明"
+    for d in skel.days:
+        assert d.day >= 1 and isinstance(d.stops, list)
+        # 骨架 stops 是地名文本，不可能是候选池里的真实 id
+        assert all(s for s in d.stops)
+
+
+def test_skeleton_not_emitted_on_ask_more_path():
+    """需求不齐走追问时**不发骨架** —— 没有目的地/日期的骨架只会误导用户。"""
+    events, _ = run(_collect(make_nodes(today=TODAY, extract_script=_intent(script_date=None))))
+
+    assert "skeleton" not in _types(events)
+    assert "trip" not in _types(events)
+    assert "token" in _types(events)  # 追问文本照发
+
+
 def test_tool_events_report_only_top_level_task():
     """🔴 子 agent 内部的 search_poi 不得漏进 tool 事件 —— 只报模型发起的 task。"""
     events, _ = run(_collect(_happy_nodes()))

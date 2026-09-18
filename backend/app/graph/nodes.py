@@ -45,6 +45,7 @@ responding to each 'tool_call_id'`）。
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
@@ -146,6 +147,9 @@ AGENT_SYSTEM_PROMPT = """你是行程规划助手。**你现在的工作是收�
 1. 按用户偏好拆成 1~3 个搜索任务，每个任务一次 `task` 调用。
    任务描述必须**自包含**（城市 + 找什么 + 约束），因为子 agent 看不到我们的对话。
    比如一个任务找景点、一个任务找吃的。不要派 4 个以上。
+   **相互独立的任务要在同一次回复里一起派**（并行执行，省时间）：
+   例如「找景点」和「找餐厅」互不依赖，就一次同时发两个 `task` 调用；
+   只有当下一个任务的描述取决于上一个的结果时才分开派。
 2. 需要判断顺序是否合理时，用算距离工具查相邻两站的车程。
    **不需要为了每一对站点都算一遍**，只算你打算真正相邻的那几对。
 3. 如果行程日期在天气可查范围内，查一下天气（一天一次就够）。
@@ -180,6 +184,55 @@ PLAN_JSON_REMINDER = """输出格式（严格遵守，字段名一个都不能�
 {schema}
 
 再次强调：`poi_id` 只能取「候选地点」清单里的第一列。"""
+
+
+SKEL_SYSTEM_PROMPT = """你负责给出行程的**快速骨架**：哪天去哪、每天的主题。
+这是一个"先看版" —— 用户在正式搜索和验证完成前先看到大致安排，
+所以**不要查任何数据，不要调用任何工具，凭用户需求直接排出框架**。
+
+规则：
+- 只用用户提到的地点和你对该目的地的高置信度常识（著名地标可以写）。
+- 每天 2~4 个地点，按合理的地理顺序排（同一天的地点应该相邻）。
+- 用户指定必去的地点（如"必须包含故宫和长城"）必须出现。
+- 天数以用户需求为准；推不出每天的具体日期就填 null。
+- 这份骨架**没有经过任何验证**，所以它后面一定会有正式行程替换 —— 不追求精确。
+"""
+
+SKEL_JSON_REMINDER = """输出格式（严格遵守，只输出 JSON，不要任何解释文字）：
+{"title": "北京 5 天行程", "days": [{"day": 1, "date": "2026-10-02 或 null", "theme": "主题短语", "stops": ["地点名", "地点名"]}]}"""
+
+
+def build_skel_prompt(message: str, requirements: dict[str, Any], today: Date) -> str:
+    """骨架节点的用户侧 prompt：用户原话 + 已抽到的需求 + 今天（算日期用）。"""
+    req = Requirements.model_validate(requirements or {})
+    party_bits: list[str] = []
+    if req.travelers:
+        if req.travelers.adults:
+            party_bits.append(f"{req.travelers.adults}成人")
+        if req.travelers.children:
+            party_bits.append(f"{req.travelers.children}小孩")
+        if req.travelers.elders:
+            party_bits.append(f"{req.travelers.elders}老人")
+    lines = [
+        "# 用户原话",
+        message,
+        "",
+        "# 已确认的需求",
+        f"- 目的地：{req.destination or '（未说）'}",
+        f"- 出发日期：{req.date.isoformat() if req.date else '（未说）'}",
+        f"- 天数：{req.days or '（未说）'}",
+        f"- 同行人：{'、'.join(party_bits) or '（未说）'}",
+        f"- 预算：{req.budget if req.budget is not None else '（未说）'}",
+        f"- 偏好：{'、'.join(req.preferences) or '（未说）'}",
+        f"- 特别要求：{req.notes or '（未说）'}",
+        "",
+        "# 今天",
+        today.isoformat(),
+        "",
+        "# 输出",
+        SKEL_JSON_REMINDER,
+    ]
+    return "\n".join(lines)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -327,6 +380,11 @@ class Nodes:
     所以要能整个换掉（测试里塞假 LLM 或塞一个必抛异常的假 LLM，
     验证"软判据挂了不影响行程产出"）。"""
 
+    llm_skel: BaseChatModel | None = None
+    """给 `make_skeleton`（快速骨架，D77）。None 时回退到 `llm_extract`
+    （同形：不挂 tools + 关思考 + temp=0）—— 生产由 `build_runtime` 传专用实例，
+    测试不传也能跑，只是骨架走抽取档。"""
+
     today: Date | None = None
     """测试注入固定"今天"。**生产代码不要传** —— 它存在的唯一理由是
     让"相对日期换算"和"日期不能是过去"这两条可被断言。"""
@@ -340,6 +398,7 @@ class Nodes:
 
     def __post_init__(self) -> None:
         self._tools_by_name = {t.name: t for t in self.tools}
+        self.llm_skel = self.llm_skel or self.llm_extract
         # bind_tools 每次调用都重算一遍 schema，缓存下来
         self._agent_llm = (
             self.llm_tool.bind_tools(self.tools) if self.tools else self.llm_tool
@@ -430,6 +489,75 @@ class Nodes:
         missing = list(state.get("missing_required") or req.missing_blocking())
         text = build_ask_text(req, missing)
         return {"ask": text, "messages": [AIMessage(content=text)]}
+
+    # ══════════════════════════════════════════════════════════
+    #  ⑩ make_skeleton —— 快速骨架（D77，"首结果延迟"优化）
+    # ══════════════════════════════════════════════════════════
+
+    async def make_skeleton(self, state: dict[str, Any]) -> dict[str, Any]:
+        """搜索循环开始前，先用**一次不挂工具的 LLM 调用**（约 20~30s）给出行程框架。
+
+        动机（2026-09-18 实测）：完整规划 9m48s，其中 85% 是 LLM 调用次数 ×
+        单次延迟 —— 精排结果最快也要 3 分钟以上才出来。行业共识（调研 2026-09-18）
+        是"正确指标是**首结果延迟**，不是完成时间"：先给可用结果，验证后台继续。
+
+        🔴 **这是一个 best-effort 节点**：任何失败（LLM 挂了、JSON 解析不出、
+        结构不对）都只返回 `{}`，**绝不写 error、绝不打断主流程** ——
+        骨架是锦上添花，它的失败模式必须是"用户没看到骨架"，不是"行程没了"。
+        与 `soft_check` 同一条哲学：装饰性调用不许有破坏性失败。
+        """
+        message = (state.get("user_message") or "").strip()
+        if not message:
+            return {}
+        # 追问轮不排骨架：需求都没齐，骨架只会误导
+        if state.get("missing_required"):
+            return {}
+
+        prompt = build_skel_prompt(message, state.get("requirements") or {}, self._now_date())
+        messages = [SystemMessage(content=SKEL_SYSTEM_PROMPT), HumanMessage(content=prompt)]
+
+        # 解析失败重试一次（与 generate_plan 同策略：JSON 合法性模型自己能修）
+        text = ""
+        for _attempt in range(2):
+            try:
+                resp = await self.llm_skel.ainvoke(messages)
+                text = resp.content if isinstance(resp.content, str) else str(resp.content)
+                text = text.strip()
+                if text.startswith("```"):
+                    text = "\n".join(
+                        ln for ln in text.splitlines() if not ln.strip().startswith("```")
+                    ).strip()
+                payload = json.loads(text)
+                days = []
+                for i, d in enumerate(payload.get("days") or [], start=1):
+                    stops = [str(s) for s in (d.get("stops") or []) if str(s).strip()]
+                    theme = str(d.get("theme") or "").strip()
+                    if not theme and not stops:
+                        continue
+                    days.append(
+                        {
+                            "day": int(d.get("day") or i),
+                            "date": (str(d.get("date")).strip() or None)
+                            if d.get("date")
+                            else None,
+                            "theme": theme,
+                            "stops": stops,
+                        }
+                    )
+                if not days:
+                    raise ValueError("days 为空")
+                title = str(payload.get("title") or "").strip() or "行程骨架（草排）"
+                # 天数校验：骨架声称的天数与需求差太多时仍然放行 ——
+                # 它本来就不精确，正式行程会替换它；这里不设硬闸。
+                return {"skeleton": {"title": title, "days": days}}
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("make_skeleton 第 %s 次解析失败：%s", _attempt + 1, exc)
+                if text:
+                    messages.append(AIMessage(content=text))
+                messages.append(
+                    HumanMessage(content="上一次输出无法解析，请重新只输出符合格式的 JSON。")
+                )
+        return {}
 
     # ══════════════════════════════════════════════════════════
     #  ② agent_step —— L2 里的模型侧
@@ -550,34 +678,23 @@ class Nodes:
             subagent_trace_scope(),
             keyword_ledger_scope(keywords_ledger),
         ):
-            for index, call in enumerate(calls):
+
+            async def _run_one(call: dict[str, Any]) -> ToolMessage:
                 name = str(call.get("name") or "")
                 args = call.get("args") or {}
                 call_id = str(call.get("id") or "")
-
-                if index >= allowed:
-                    results.append(
-                        ToolMessage(
-                            content=TOOL_BUDGET_TEXT, tool_call_id=call_id, name=name or "unknown"
-                        )
-                    )
-                    continue
-
                 tool = self._tools_by_name.get(name)
 
                 if tool is None:
                     # 模型编了一个不存在的工具 —— 回话让它改，**不能跳过**
-                    results.append(
-                        ToolMessage(
-                            content=(
-                                f"没有名为「{name}」的工具。可用工具："
-                                f"{'、'.join(self._tools_by_name) or '（一个都没有）'}"
-                            ),
-                            tool_call_id=call_id,
-                            name=name or "unknown",
-                        )
+                    return ToolMessage(
+                        content=(
+                            f"没有名为「{name}」的工具。可用工具："
+                            f"{'、'.join(self._tools_by_name) or '（一个都没有）'}"
+                        ),
+                        tool_call_id=call_id,
+                        name=name or "unknown",
                     )
-                    continue
 
                 try:
                     # config 显式传下去：让这次工具调用挂进 astream_events 的事件树
@@ -596,7 +713,38 @@ class Nodes:
                         f"可以先换个关键词或换个工具试试，不要因此就凭记忆编数据。"
                     )
 
-                results.append(ToolMessage(content=text, tool_call_id=call_id, name=name))
+                return ToolMessage(content=text, tool_call_id=call_id, name=name)
+
+            # ── 并行执行（D76）──
+            # 一轮里的多个工具调用若互不依赖（模型同轮派出的多个 `task` 搜索任务、
+            # 批量查天气），串行 await 就是纯等待 —— 2026-09-18 实测 60% 耗时在这。
+            # `gather` 并发跑；各自的安全网不变：
+            # · 高德限速是"取号式"模块级排队（单 loop 原子），并发自动串成 2.2 QPS 队列
+            # · 池子/台账/trace 是同 context 内追加，无共享写冲突
+            # 预算超限的调用不进 gather，直接回拒绝消息（语义不变）。
+            # ToolMessage 顺序按原 tool_calls 顺序回填 —— 顺序变了模型对不上号。
+            over_budget = [c for i, c in enumerate(calls) if i >= allowed]
+            in_budget = [c for i, c in enumerate(calls) if i < allowed]
+
+            over_budget_msgs = [
+                ToolMessage(
+                    content=TOOL_BUDGET_TEXT,
+                    tool_call_id=str(c.get("id") or ""),
+                    name=str(c.get("name") or "") or "unknown",
+                )
+                for c in over_budget
+            ]
+
+            if in_budget:
+                run_msgs = list(
+                    await asyncio.gather(*(_run_one(c) for c in in_budget))
+                )
+            else:
+                run_msgs = []
+
+            # 回填：预算内的按原顺序排前面，超限拒绝消息按原顺序接在后面
+            results.extend(run_msgs)
+            results.extend(over_budget_msgs)
 
             snapshot = _pool_dump(active)
             sub_trace = drain_subagent_trace()

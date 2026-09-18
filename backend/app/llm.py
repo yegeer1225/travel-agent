@@ -81,6 +81,24 @@ def build_tool_llm(model: str | None = None) -> ChatOpenAI:
     )
 
 
+def build_skel_llm(model: str | None = None) -> ChatOpenAI:
+    """给 `make_skeleton`（快速骨架，D77）用：**不挂 tools + 关思考 + temperature=0**。
+
+    与 `build_extract_llm` 同形但**单独开工厂**，理由与 `build_soft_llm` 同款：
+
+    1. **骨架是延迟敏感的** —— 它存在的唯一意义是"快"（首结果 20~30 秒）。
+       开思考等于每次多烧几十秒推理 token，直接毁掉这个节点的目的。
+    2. **模型档位复用 tool 档（快档）**：骨架不需要深度推理，
+       它只是把用户需求整理成"哪天去哪"的框架，深度排布是 `generate_plan` 的事。
+    3. 语义上它是独立职责 —— 骨架的 prompt 演进不该牵动 `parse_intent`。
+    """
+    return _build(
+        model or settings.llm_model_tool,
+        settings.llm_thinking_tool,
+        temperature=0,
+    )
+
+
 def build_plan_llm(model: str | None = None) -> ChatOpenAI:
     """给 `generate_plan` 用：**开思考**，不设 temperature。
 
@@ -177,6 +195,7 @@ __all__ = [
     "DEFAULT_TIMEOUT",
     "build_extract_llm",
     "build_plan_llm",
+    "build_skel_llm",
     "build_soft_llm",
     "build_sub_llm",
     "build_tool_llm",

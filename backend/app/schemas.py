@@ -393,6 +393,7 @@ class SSEEventType(StrEnum):
     TOOL_CALL = "tool_call"  # 模型决定调工具
     TOOL_RESULT = "tool_result"  # 工具返回
     TOKEN = "token"  # 最终答复的文本增量（打字机）
+    SKELETON = "skeleton"  # 快速骨架（D77）：精排结果出来前的"先看版"，未经验证
     TRIP = "trip"  # 完整行程（前端据此渲染行程卡/跳路线总览）
     CHECK = "check"  # 校验卡
     DONE = "done"  # 流正常结束
@@ -445,6 +446,34 @@ class TokenEvent(BaseModel):
     text: str
 
 
+class SkeletonDay(BaseModel):
+    """骨架里的一天。⚠️ `stops` 是**地名文本，不是 POI id** ——
+    骨架在搜索开始前生成，**未经验证**，前端绝不能把它渲染成可交互的站点卡。"""
+
+    day: int  # 第几天，从 1 起
+    date: str | None = None  # YYYY-MM-DD；推不出准确日期就 None
+    theme: str  # "经典地标" / "长城一日" 之类的主题短语
+    stops: list[str] = Field(default_factory=list)  # 当天地点名，顺序即建议顺序
+
+
+class SkeletonEvent(BaseModel):
+    """快速骨架（D77）—— 「首结果延迟」优化的核心事件。
+
+    一次**不挂工具**的快速 LLM 调用（约 20~30 秒）在搜索循环开始前先给出
+    行程框架，让用户立刻有东西可看；后台精排继续跑，`trip` 事件到达后
+    前端**用它整体替换骨架**（骨架不是增量，不合并）。
+
+    ⚠️ 这是一次**有意的契约扩展**（契约纪律照走：先扩 schemas → 重生成
+    types.ts → 更新 api.md → 通知前端）。旧前端不认识这个 type 会**忽略**
+    （联合体注释里写死的规则），不会崩 —— 但要看到骨架收益必须升级前端。
+    """
+
+    type: Literal["skeleton"] = "skeleton"
+    title: str  # "北京 5 天行程（草排）"
+    days: list[SkeletonDay] = Field(default_factory=list)
+    note: str = "快速草排，地点未经验证；正在核实真实地点与可行性，完成后自动替换"
+
+
 class TripEvent(BaseModel):
     type: Literal["trip"] = "trip"
     trip: Trip
@@ -482,6 +511,7 @@ SSEEvent = Annotated[
     | ToolCallEvent
     | ToolResultEvent
     | TokenEvent
+    | SkeletonEvent
     | TripEvent
     | CheckEvent
     | DoneEvent
@@ -1039,6 +1069,8 @@ __all__ = [
     "ToolCallEvent",
     "ToolResultEvent",
     "TokenEvent",
+    "SkeletonDay",
+    "SkeletonEvent",
     "TripEvent",
     "CheckEvent",
     "DoneEvent",

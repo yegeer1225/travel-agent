@@ -47,6 +47,7 @@ from app.schemas import (
     ErrorEvent,
     NodeEvent,
     SSEEventType,
+    SkeletonEvent,
     ToolCallEvent,
     ToolResultEvent,
     TokenEvent,
@@ -58,6 +59,7 @@ from app.schemas import (
 NODE_LABELS: dict[str, str] = {
     "parse_intent": "正在理解你的需求",
     "ask_more": "整理追问",
+    "make_skeleton": "正在快速排骨架",
     "agent_step": "规划下一步",
     "tool_step": "执行查询",
     "generate_plan": "生成行程草稿",
@@ -204,6 +206,16 @@ async def graph_chat_stream(
 
                     if name == "ask_more" and output.get("ask"):
                         await queue.put(("event", TokenEvent(type=SSEEventType.TOKEN, text=str(output["ask"]))))
+
+                    elif name == "make_skeleton" and output.get("skeleton"):
+                        # 快速骨架（D77）：精排前的"先看版"。best-effort 节点，
+                        # 解析失败 output 里就没有 skeleton，静默跳过即可。
+                        skel = output["skeleton"]
+                        await queue.put(("event", SkeletonEvent(
+                            type=SSEEventType.SKELETON,
+                            title=str(skel.get("title") or "行程骨架（草排）"),
+                            days=skel.get("days") or [],
+                        )))
 
                     elif name == "check_plan":
                         # 缓存校验产物，等 soft_check 补上软提醒后一起发校验卡

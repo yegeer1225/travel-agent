@@ -80,6 +80,12 @@ class TripState(TypedDict, total=False):
     """用户插队消息（steering）。**不加 reducer** —— 要的就是覆盖语义，
     `drain_pending_messages` 返回 `[]` 即清空。"""
 
+    skeleton: dict[str, Any]
+    """快速骨架（D77）：`{title, days: [{day, date, theme, stops}]}`。
+    `make_skeleton` 写，SSE 层读走发 `SkeletonEvent`。
+    ⚠️ 这里的地点是**未验证的地名文本**，绝不能混进 `collected_pois` ——
+    校验层的封闭世界只认真实搜索返回的 POI。"""
+
     # ══════════ 事实快照 ══════════
     collected_pois: dict[str, dict[str, Any]]
     """本轮工具**真实返回过**的 POI（id → dump）。

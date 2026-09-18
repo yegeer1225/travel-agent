@@ -218,6 +218,12 @@ SOFT_EMPTY = soft_says()
 #: （把池里能当站点的都端出来）。池子空时返回"没有找到合适的候选"。
 SUB_FINAL_EMPTY = ai_text('{"action": "final", "picks": []}')
 
+#: 骨架节点的**默认**回复（D77）。大多数测试不关心骨架长什么样，
+#: 给一份最小合法骨架让节点安静地过；要测骨架行为时用 `skel_script` 覆盖。
+SKEL_EMPTY = ai_text(
+    '{"title": "测试骨架", "days": [{"day": 1, "date": null, "theme": "测试", "stops": ["测试点"]}]}'
+)
+
 
 def sub_finds(*keywords: str, picks: list[dict] | None = None) -> list[AIMessage]:
     """造一段子 agent 脚本：一轮把关键词搜完，然后终选。
@@ -242,6 +248,7 @@ def make_nodes(
     extract_script: Sequence[AnyMessage] | None = None,
     soft_script: Sequence[AnyMessage] | None = None,
     sub_script: Sequence[AnyMessage] | None = None,
+    skel_script: Sequence[AnyMessage] | None = None,
     provider: Any = None,
     today: date | None = None,
     tools: list | None = None,
@@ -273,6 +280,7 @@ def make_nodes(
         llm_plan=ScriptedChatModel(script=list(plan_script or [])),
         llm_extract=ScriptedChatModel(script=list(extract_script or [])),
         llm_soft=ScriptedChatModel(script=list(soft_script or [SOFT_EMPTY])),
+        llm_skel=ScriptedChatModel(script=list(skel_script or [SKEL_EMPTY])),
         today=today,
         **kwargs,
     )

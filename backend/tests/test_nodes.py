@@ -365,6 +365,110 @@ def test_tool_step_turns_exception_into_tool_message():
     assert "error" not in out
 
 
+def test_tool_step_runs_independent_calls_concurrently():
+    """🔴 D76：一轮里的多个工具调用必须**并行**执行。
+
+    2026-09-18 端到端实测：60% 耗时（401s）花在「执行查询」，且每轮只有
+    一个任务在跑 —— 串行 await 就是纯等待。这条测试用两个各睡 0.3s 的
+    慢工具做秒表：并行 ≈ 0.3s，串行 ≥ 0.6s。预算闸 0.6s 给足抖动余量。
+    """
+    import asyncio
+    import time as _time
+
+    from langchain_core.tools import StructuredTool
+
+    async def _slow(name: str) -> str:
+        await asyncio.sleep(0.3)
+        return f"{name}-done"
+
+    slow_tool = StructuredTool.from_function(
+        func=lambda name: name,  # 同步占位（不会被调，走 coroutine）
+        coroutine=_slow,
+        name="slow_probe",
+        description="测试用慢工具",
+    )
+    nodes = make_nodes(tools=[slow_tool])
+    ai = ai_multi_tool_calls(
+        ("slow_probe", {"name": "a"}),
+        ("slow_probe", {"name": "b"}),
+    )
+    started = _time.monotonic()
+    out = run(nodes.tool_step(make_state(messages=[ai])))
+    elapsed = _time.monotonic() - started
+
+    assert [m.content for m in out["messages"]] == ["a-done", "b-done"]
+    assert out["tool_call_count"] == 2
+    assert elapsed < 0.6, f"两个 0.3s 调用花了 {elapsed:.2f}s —— 说明还是串行"
+
+
+def test_tool_step_budget_rejection_keeps_call_order():
+    """超预算的调用回拒绝消息，且**顺序与原 tool_calls 一致** —— 顺序变了模型对不上号。"""
+    nodes = make_nodes(max_tool_calls=1)
+    ai = ai_multi_tool_calls(
+        ("get_weather", {"date_str": TODAY.isoformat()}),
+        ("get_weather", {"date_str": TODAY.isoformat()}),
+        ("get_weather", {"date_str": TODAY.isoformat()}),
+    )
+    out = run(nodes.tool_step(make_state(messages=[ai])))
+
+    msgs = out["messages"]
+    assert len(msgs) == 3
+    assert "没有执行" in msgs[1].content
+    assert msgs[1].content == msgs[2].content
+    assert [m.tool_call_id for m in msgs] == ["call_1", "call_2", "call_3"]
+
+
+def test_make_skeleton_parses_valid_json():
+    """D77：骨架节点把 LLM 的 JSON 排进 state。"""
+    nodes = make_nodes(
+        skel_script=[
+            ai_text(
+                '{"title": "北京 5 天", "days": ['
+                '{"day": 1, "date": "2026-10-02", "theme": "经典地标", "stops": ["故宫", "景山公园"]},'
+                '{"day": 2, "date": null, "theme": "长城", "stops": ["慕田峪长城"]}'
+                "]}"
+            )
+        ]
+    )
+    out = run(nodes.make_skeleton(make_state(user_message="10月2日去北京玩5天")))
+
+    skel = out["skeleton"]
+    assert skel["title"] == "北京 5 天"
+    assert len(skel["days"]) == 2
+    assert skel["days"][0]["stops"] == ["故宫", "景山公园"]
+    assert skel["days"][1]["date"] is None
+    assert "error" not in out
+
+
+def test_make_skeleton_failure_is_silent():
+    """🔴 best-effort 铁律：骨架挂了**什么都不写**，绝不 error、绝不打断主流程。
+    （软检同哲学 —— 装饰性调用不许有破坏性失败。）"""
+    nodes = make_nodes(skel_script=[ai_text("这不是 JSON"), ai_text("这也不是 JSON")])
+    out = run(nodes.make_skeleton(make_state(user_message="去成都玩3天")))
+
+    assert out == {}, f"骨架失败必须静默返回空，实际：{out}"
+
+
+def test_make_skeleton_skipped_when_requirements_missing():
+    """追问轮不排骨架 —— 没有目的地/日期的骨架只会误导用户。"""
+    nodes = make_nodes()
+    out = run(
+        nodes.make_skeleton(make_state(user_message="去玩", missing_required=["destination"]))
+    )
+    assert out == {}
+
+
+def test_make_skeleton_retries_once_then_gives_up():
+    """第一次输出带 markdown 围栏 → 剥掉后成功；只给一次重试机会（与草稿同策略）。"""
+    nodes = make_nodes(
+        skel_script=[
+            ai_text('```json\n{"title": "围栏版", "days": [{"day": 1, "theme": "t", "stops": ["a"]}]}\n```')
+        ]
+    )
+    out = run(nodes.make_skeleton(make_state(user_message="去西安玩2天")))
+    assert out["skeleton"]["title"] == "围栏版"
+
+
 def test_tool_step_records_pois_into_state_snapshot():
     """工具返回的 POI 必须进快照 —— 否则校验层拿不到判据来源。
 

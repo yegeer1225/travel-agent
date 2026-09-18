@@ -12,31 +12,35 @@
           ┌──────────┴───────────┐
           │是                     │否
           ▼                       ▼
-    ┌───────────┐          ┌────────────┐         ┌───────────┐
-    │ ask_more  │  ⑨       │ agent_step │◄────────┤  repair   │ ⑦
-    └─────┬─────┘          └──────┬─────┘         └─────▲─────┘
-          │                       │ 模型还要调工具？      │ 有硬错
-         END          ┌───────────┴──────────┐          │ 且未超限
-                      │是                    │否        │
-                      ▼                      ▼          │
-                ┌───────────┐        ┌───────────────┐   │
-                │ tool_step │  ②     │ generate_plan │   │
-                └─────┬─────┘        └───────┬───────┘   │
-                      │ 回 L2                │ ③        │
-                      └──► agent_step        ▼          │
-                                    ┌────────────────┐   │
-                                    │   check_plan   │───┘
-                                    └────────┬───────┘
-                                             │ 无硬错 / 已达打回上限
-                                             ▼
-                                    ┌────────────────┐
-                                    │   soft_check   │ ⑥ 只提醒，不打回
-                                    └────────┬───────┘
-                                             ▼
-                                       ┌───────────┐
-                                       │  render   │  ⑤
-                                       └─────┬─────┘
-                                            END
+    ┌───────────┐          ┌───────────────┐        ┌───────────┐
+    │ ask_more  │  ⑨       │ make_skeleton │  ⑩     │  repair   │ ⑦
+    └─────┬─────┘          └──────┬────────┘        └─────▲─────┘
+          │                       │ 快速骨架（不调工具）    │
+          │                ┌──────┴────────┐              │
+          │                │  agent_step   │◄─────────────┤
+          │                └──────┬────────┘              │
+          │                       │ 模型还要调工具？       │
+          │                ┌──────┴──────────┐            │
+          │                │是                │否          │
+          │                ▼                  ▼            │
+          │          ┌───────────┐    ┌───────────────┐   │
+          │          │ tool_step │ ②  │ generate_plan │   │
+          │          └─────┬─────┘    └───────┬───────┘   │
+          │                │ 回 L2            │ ③         │
+          │                └──► agent_step    ▼            │
+          │                              ┌────────────────┐│
+          │                              │   check_plan   │┘
+          │                              └────────┬───────┘
+          │                                       │ 无硬错 / 已达打回上限
+          │                                       ▼
+          │                              ┌────────────────┐
+          │                              │   soft_check   │ ⑥ 只提醒，不打回
+          │                              └────────┬───────┘
+          │                                       ▼
+          │                                 ┌───────────┐
+          │                                 │  render   │  ⑤
+          │                                 └─────┬─────┘
+          │                                      END
 ```
 
 ═══════════════════════════════════════════════════════════════
@@ -107,7 +111,14 @@ def build_runtime(
     （塞 mock provider、塞假 LLM），不需要动图结构。
     """
     from app.graph.subagent import build_search_subagent, build_task_tool
-    from app.llm import build_extract_llm, build_plan_llm, build_soft_llm, build_sub_llm, build_tool_llm
+    from app.llm import (
+        build_extract_llm,
+        build_plan_llm,
+        build_skel_llm,
+        build_soft_llm,
+        build_sub_llm,
+        build_tool_llm,
+    )
     from app.providers.mock import MOCK_CITY, MockAmapProvider
 
     if provider is not None:
@@ -151,12 +162,13 @@ def build_runtime(
         llm_plan=build_plan_llm(model),
         llm_extract=build_extract_llm(model),
         llm_soft=build_soft_llm(model),
+        llm_skel=build_skel_llm(model),
         today=today,
     )
 
 
 def build_graph(nodes: Nodes, checkpointer: Any | None = None) -> CompiledStateGraph:
-    """把 9 个节点和 6 条边接起来。
+    """把 10 个节点和边接起来。
 
     条件边的路由函数**定义在这里而不是 nodes.py**：
     路由是"图的形状"，属于本文件；节点是"一步做什么"，属于 `nodes.py`。
@@ -171,13 +183,13 @@ def build_graph(nodes: Nodes, checkpointer: Any | None = None) -> CompiledStateG
     # ══════════════════════════════════════════════════════════
 
     def after_intent(state: TripState) -> str:
-        """缺目的地/日期 → 追问；否则开工。
+        """缺目的地/日期 → 追问；否则先快速排骨架再开工（D77）。
 
         ⚠️ 只问**阻塞项**（A25）。`missing_required` 由 `parse_intent` 用
         `Requirements.missing_blocking()` 算出来，**永远只含那两个字段**。
         用"7 项缺任何一项都追问"会让 agent 卡死在用户不想回答的预算上。
         """
-        return "ask_more" if (state.get("missing_required") or []) else "agent_step"
+        return "ask_more" if (state.get("missing_required") or []) else "make_skeleton"
 
     def after_agent(state: TripState) -> str:
         """模型还要调工具吗？
@@ -234,6 +246,7 @@ def build_graph(nodes: Nodes, checkpointer: Any | None = None) -> CompiledStateG
 
     builder.add_node("parse_intent", nodes.parse_intent)
     builder.add_node("ask_more", nodes.ask_more)
+    builder.add_node("make_skeleton", nodes.make_skeleton)
     builder.add_node("agent_step", nodes.agent_step)
     builder.add_node("tool_step", nodes.tool_step)
     builder.add_node("generate_plan", nodes.generate_plan)
@@ -247,8 +260,9 @@ def build_graph(nodes: Nodes, checkpointer: Any | None = None) -> CompiledStateG
     builder.add_conditional_edges(
         "parse_intent",
         after_intent,
-        {"ask_more": "ask_more", "agent_step": "agent_step"},
+        {"ask_more": "ask_more", "make_skeleton": "make_skeleton"},
     )
+    builder.add_edge("make_skeleton", "agent_step")  # ← 骨架发完事件就进工具循环（D77）
     builder.add_conditional_edges(
         "agent_step",
         after_agent,
