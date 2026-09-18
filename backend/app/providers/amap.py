@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import math
 import time
 from datetime import date
 from typing import Any
@@ -40,6 +39,7 @@ import httpx
 
 from app.providers.base import DistanceResult
 from app.schemas import AmapPoi, Weather, WeatherStatus
+from app.utils import haversine_km
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +86,16 @@ MIN_INTERVAL_S = 0.45
 ⚠️ 这是**进程内**限速（D28）。多进程部署时每个进程各自计数 → 实际 QPS 会翻倍，
 到 M5 上多 worker 时要换成 Redis 令牌桶。**现在不引 Redis 是刻意的**（单进程够用）。
 ⚠️ 状态必须是**模块级**（见下方 `_next_slot_ts`）—— 放实例级会漏，因为 provider 每请求新建。"""
+
+SEARCH_RADIUS_M = 20_000
+"""`location`（搜索中心点）配的半径，单位**米**，高德上限 50000。
+
+⚠️ 它是**排序权重不是硬过滤**：实测搜「都江堰」（离中心点 56 km）时，
+给 `radius=15000` 与不给的返回**完全一致**（重合 20/20，目标仍排第 1）。
+所以这个值**不用调准** —— 它只影响"近的排多前"，不会造成"搜不到"。
+
+取 20 km 的依据：一个城市的同城游玩范围通常在这个量级内，
+再大就接近"跨城"（成都→都江堰 56 km），加权的意义反而模糊了。"""
 
 _RETRY_BACKOFF_S = (1.0, 2.0, 4.0)
 """重试退避（D26）。GET 天然幂等，所以可以无脑重试。"""
@@ -256,21 +266,6 @@ def parse_poi(raw: dict[str, Any]) -> AmapPoi | None:
     )
 
 
-def _haversine_km(a: tuple[float, float], b: tuple[float, float]) -> float:
-    """球面直线距离。**参数是 `(lng, lat)`。**
-
-    为什么本地算而不用 `type=0`：本地算**不花配额**，而且省一次请求就少一次撞限流的机会。
-    实测 `type=0` 给的距离与本地 haversine 一致（武侯祠→青城山：54504m vs 本地算 ≈54.5km）。
-    """
-    lng1, lat1 = a
-    lng2, lat2 = b
-    p1, p2 = math.radians(lat1), math.radians(lat2)
-    dphi = p2 - p1
-    dlambda = math.radians(lng2 - lng1)
-    h = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlambda / 2) ** 2
-    return 2 * 6371.0088 * math.asin(math.sqrt(h))
-
-
 # ══════════════════════════════════════════════════════════════
 
 
@@ -404,11 +399,16 @@ class AmapHttpProvider:
         keyword: str,
         city: str | None = None,
         limit: int = 10,
+        center: str | None = None,
     ) -> list[AmapPoi]:
         """`/v3/place/text`。
 
         `extensions=all` **必加** —— 不加就没有 `biz_ext`（评分/营业时间/人均全靠它）。
         `offset` 走 `limit`，上限 25（实测 50 也能返回，但不依赖未文档化的行为）。
+
+        `center` → `location` + `radius`：按距离加权排序（见基类说明）。
+        `radius` 单位**米**，上限 50000；这里是排序权重、**不是硬过滤**，
+        所以给小了也不会"搜不到"远处的目标。
         """
         keyword = (keyword or "").strip()
         if not keyword:
@@ -421,6 +421,9 @@ class AmapHttpProvider:
         }
         if city:
             params["city"] = city
+        if center:
+            params["location"] = center
+            params["radius"] = SEARCH_RADIUS_M
 
         payload = await self._request("/v3/place/text", **params)
         raws = payload.get("pois")
@@ -562,7 +565,7 @@ class AmapHttpProvider:
         return DistanceResult(
             km=round(distance_m / 1000, 2),
             drive_min=drive_min,
-            straight_km=round(_haversine_km(origin, dest), 2),
+            straight_km=round(haversine_km(origin, dest), 2),
         )
 
     # ── 内部 ───────────────────────────────────────────────────

@@ -20,7 +20,8 @@ import pytest
 from app.providers.mock import MOCK_CITY, MockAmapProvider
 from app.schemas import AmapPoi
 from app.tools import build_amap_tools, current_pool, poi_pool_scope
-from app.tools.amap_tools import MAX_CANDIDATES, SEARCH_FETCH
+from app.tools.amap_tools import MAX_CANDIDATES, SEARCH_FETCH, _search_center
+from app.utils import haversine_km
 
 TODAY = date(2026, 9, 15)
 
@@ -147,7 +148,7 @@ def make_poi(poi_id: str, name: str, type_str: str | None) -> AmapPoi:
 
 
 class ScriptedSearchProvider:
-    """只为 `search_poi` 造的桩：返回**预设顺序**的候选，并记下每次的 `limit`。"""
+    """只为 `search_poi` 造的桩：返回**预设顺序**的候选，并记下每次的 `limit` 与 `center`。"""
 
     name = "scripted"
 
@@ -158,11 +159,17 @@ class ScriptedSearchProvider:
     def __init__(self, pois: list[AmapPoi]) -> None:
         self.pois = pois
         self.limits: list[int] = []
+        self.centers: list[str | None] = []
 
     async def search_poi(
-        self, keyword: str, city: str | None = None, limit: int = 10
+        self,
+        keyword: str,
+        city: str | None = None,
+        limit: int = 10,
+        center: str | None = None,
     ) -> list[AmapPoi]:
         self.limits.append(limit)
+        self.centers.append(center)
         return self.pois[:limit]
 
     async def get_poi(self, poi_id: str):  # pragma: no cover - 用不到
@@ -377,3 +384,85 @@ def test_candidate_limit_is_module_level_not_model_controlled() -> None:
     让模型设 `limit` 只是多一个能设错的地方 —— 它并不知道多给几个对决策更好。
     """
     assert MAX_CANDIDATES == 8
+
+
+# ══════════════════════════════════════════════════════════════
+#  ⑤ 搜索中心点（D75）
+# ══════════════════════════════════════════════════════════════
+
+# 实测拿到的真实坐标 —— 用真数据而不是编的，这样"抗离群"那条断言有实际意义
+KUANZHAI = (104.053307, 30.663869)  # 宽窄巷子景区（青羊区，市中心）
+WUHOU = (104.047992, 30.646168)  # 成都武侯祠博物馆（武侯区，市中心偏南）
+DUJIANGYAN = (103.610529, 31.003363)  # 都江堰景区（远郊，离市区 56 km）
+
+
+def _at(poi_id: str, lng: float, lat: float) -> AmapPoi:
+    return AmapPoi(poi_id=poi_id, name=f"测试点{poi_id}", lng=lng, lat=lat)
+
+
+def test_search_center_is_none_without_active_pool() -> None:
+    """没有活动池子时不能炸 —— 工具可能被单独调用做调试。"""
+    assert current_pool() is None
+    assert _search_center() is None
+
+
+def test_search_center_is_none_when_pool_empty() -> None:
+    """第一次搜索时池子是空的 → 不传中心点 = **与改动前逐字一致**。
+
+    这条是"改动默认等于旧行为"的守卫：新会话的第一句搜索，
+    请求里不该多出 `location`/`radius`。
+    """
+    with poi_pool_scope():
+        assert _search_center() is None
+
+
+def test_search_center_is_medoid_not_centroid() -> None:
+    """🔴 中心点必须是 medoid 而不是质心 —— 这是整件事的关键取舍。
+
+    三个锚点是实测拿到的真坐标（市区两个 + 远郊一个）。拿它们的**质心**
+    搜「公园」会落在郫都区（到两边各 28 km），返回郫都区的公园 —— **比不加还差**。
+    medoid 选中宽窄巷子，返回的是市中心公园（实测 0.8~2.6 km）。
+    """
+    with poi_pool_scope() as pool:
+        pool.record([_at("A", *KUANZHAI), _at("B", *WUHOU), _at("C", *DUJIANGYAN)])
+        assert _search_center() == "104.053307,30.663869"
+
+        # 顺带把"质心会落在哪儿"写进断言 —— 否则下一个人改成质心，
+        # 这条测试还是会过（因为 medoid 恰好也不变），但看不出为什么不能改
+        centroid = (
+            sum(p[0] for p in (KUANZHAI, WUHOU, DUJIANGYAN)) / 3,
+            sum(p[1] for p in (KUANZHAI, WUHOU, DUJIANGYAN)) / 3,
+        )
+        assert haversine_km(centroid, KUANZHAI) > 10, (
+            "质心到最近的锚点也有 10 km+ —— 它落在市区与都江堰之间的中间地带，"
+            "拿它当中心点搜出来的东西谁的行程都不挨着"
+        )
+
+
+def test_search_center_tie_prefers_first_seen() -> None:
+    """两个锚点平局时取**先出现的** —— 先搜到的通常是主景点。
+
+    实测「宽窄巷子 + 都江堰」两点到彼此距离相同（平局），
+    Python 的 `min` 返回第一个最小值 → 选中宽窄巷子 → 结果是对的。
+    """
+    with poi_pool_scope() as pool:
+        pool.record([_at("A", *KUANZHAI), _at("C", *DUJIANGYAN)])
+        assert _search_center() == "104.053307,30.663869"
+
+
+def test_second_search_carries_center_from_pool() -> None:
+    """端到端：第一次搜索不带中心点，第二次带上（锚点来自第一次的结果）。
+
+    也顺带钉住 `center` 是在 `record` **之前**算的 —— 池子里不该混进本次结果。
+    """
+    provider = ScriptedSearchProvider([_at("A", *KUANZHAI)])
+    tools = {t.name: t for t in build_amap_tools(provider)}  # type: ignore[arg-type]
+
+    async def scene() -> None:
+        with poi_pool_scope():
+            await tools["search_poi"].ainvoke({"keyword": "宽窄巷子"})  # type: ignore[attr-defined]
+            await tools["search_poi"].ainvoke({"keyword": "公园"})  # type: ignore[attr-defined]
+
+    run(scene())
+    assert provider.centers[0] is None, "首次搜索池子是空的，不该有中心点"
+    assert provider.centers[1] == "104.053307,30.663869", "第二次该用池子里的锚点当中心"

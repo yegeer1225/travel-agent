@@ -22,6 +22,7 @@ import httpx
 import pytest
 
 from app.providers.amap import (
+    SEARCH_RADIUS_M,
     AmapError,
     AmapHttpProvider,
     _num,
@@ -269,6 +270,38 @@ def test_search_poi_without_city_omits_param():
     provider = make_provider(fake)
     run(provider.search_poi("武侯祠"))
     assert "city" not in fake.params()
+
+
+def test_search_poi_passes_location_and_radius_when_center_given():
+    """给了中心点 → `location` + `radius` 都进请求（D75）。
+
+    这个参数是**排序权重不是硬过滤**（实测搜 56 km 外的目的地时返回与不加完全一致），
+    所以断言只该管"有没有传"，不该管"传了会不会搜不到"。
+    """
+    fake = FakeAmap([load("place_text_wuhouci.json")])
+    provider = make_provider(fake)
+
+    run(provider.search_poi("公园", city="成都", center="104.065735,30.659462"))
+
+    params = fake.params()
+    assert params["location"] == "104.065735,30.659462"
+    assert params["radius"] == str(SEARCH_RADIUS_M), "radius 单位是米，要按常量原样传"
+
+
+def test_search_poi_without_center_omits_location():
+    """不传中心点 → `location`/`radius` **一个都不加**。
+
+    这条是"改动的默认值是旧行为"的守卫：老调用点（首页推荐、粘贴行程补全）
+    不传 `center`，请求必须与改动前逐字一致。
+    """
+    fake = FakeAmap([load("place_text_wuhouci.json")])
+    provider = make_provider(fake)
+
+    run(provider.search_poi("武侯祠", city="成都"))
+
+    params = fake.params()
+    assert "location" not in params
+    assert "radius" not in params
 
 
 def test_search_poi_empty_keyword_does_not_call_api():

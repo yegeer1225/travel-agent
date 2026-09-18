@@ -38,6 +38,7 @@ from datetime import date, datetime, timedelta
 
 from app.providers.base import DistanceResult
 from app.schemas import AmapPoi, Weather, WeatherStatus
+from app.utils import haversine_km
 
 MOCK_CITY = "成都"
 """mock 池里 9 个点全在成都。`search_poi(city=...)` 传别的城市会得到空列表。"""
@@ -358,18 +359,6 @@ def _segment_for(straight_km: float) -> tuple[float, float]:
     return _SEGMENTS[-1][1], _SEGMENTS[-1][2]
 
 
-def _haversine_km(a: tuple[float, float], b: tuple[float, float]) -> float:
-    """球面直线距离，单位 km。参数顺序 `(lng, lat)`（高德惯例，别和 GeoJSON 搞反）。"""
-    R = 6371.0088
-    lng1, lat1 = a
-    lng2, lat2 = b
-    p1, p2 = math.radians(lat1), math.radians(lat2)
-    dp = p2 - p1
-    dl = math.radians(lng2 - lng1)
-    h = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
-    return 2 * R * math.asin(math.sqrt(h))
-
-
 # ══════════════════════════════════════════════════════════════
 #  Provider
 # ══════════════════════════════════════════════════════════════
@@ -409,7 +398,14 @@ class MockAmapProvider:
         keyword: str,
         city: str | None = None,
         limit: int = 10,
+        center: str | None = None,
     ) -> list[AmapPoi]:
+        """按关键词搜（在固定池子里查，见模块头的说明）。
+
+        `center` **接受但忽略** —— mock 池子只有 6 个成都 POI，
+        池子本身也不带"距离排序"的语义，模拟它只会造出假行为。
+        签名必须与 real 一致（D23，有 `test_mock_and_real_have_same_public_surface` 守着）。
+        """
         keyword = (keyword or "").strip()
         if not keyword:
             return []
@@ -456,7 +452,7 @@ class MockAmapProvider:
         origin: tuple[float, float],
         dest: tuple[float, float],
     ) -> DistanceResult:
-        straight = _haversine_km(origin, dest)
+        straight = haversine_km(origin, dest)
         factor, speed = _segment_for(straight)
         km = straight * factor
         minutes = round(km / speed * 60)

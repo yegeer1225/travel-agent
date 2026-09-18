@@ -35,6 +35,7 @@ from app.providers.base import AmapProvider
 from app.schemas import WeatherStatus
 from app.tools import poi_pool
 from app.tools.poi_rank import label_of, rank_pois
+from app.utils import haversine_km
 
 MAX_CANDIDATES = 8
 """一次搜索最多给模型看几个候选。
@@ -70,6 +71,44 @@ def _parse_date(value: str) -> date:
     raise ValueError(f"日期格式无法识别：{value!r}。请用 YYYY-MM-DD，例如 2026-10-01")
 
 
+def _search_center() -> str | None:
+    """给这次搜索算一个**排序中心点**（`"lng,lat"`），拿不到就返回 `None`（D75）。
+
+    ── 为什么需要 ──────────────────────────────────────────────
+    高德不给中心点时，泛关键词的落点由它自己决定。实测成都搜「公园」
+    返回的全是高新区那批（中位距市中心 **10.7 km**）；给个市中心附近的坐标后
+    变成青羊区的（**2.2 km**）。搜「博物馆」时成都博物馆从**第 9 名**跳到**第 1 名**。
+
+    ── 中心点从哪来 ────────────────────────────────────────────
+    **用已搜到的 POI**（池子里的）—— 零额外请求、零硬编码地名。
+    不能用的两条路（都实测否证过，见 D75）：
+    · `geocode("成都")` → 市政府驻地（2010 年搬到高新区）→ 返回的**还是**高新区那批
+    · 硬编码"天府广场" → 换个城市就废
+
+    ── 为什么是 medoid 而不是质心 ──────────────────────────────
+    质心会被远郊景点拉到中间地带。实测锚点取「宽窄巷子 + 都江堰」时，
+    质心落在**郫都区**（到两边各 28 km）→ 搜「公园」返回郫都区的公园，**比不加还差**。
+    medoid（到其余点距离之和最小的那个点）**一定落在某个真实锚点上**，天然抗离群：
+    同样的三个锚点（市区两个 + 都江堰一个）→ 选中宽窄巷子 → 返回市中心公园（0.8~2.6 km）。
+
+    平局时 `min` 返回**先出现的**那个 = 先搜到的锚点，而先搜到的通常是主景点 ——
+    实测「宽窄巷子 + 都江堰」两点平局时正好选中宽窄巷子，结果是对的。
+
+    ⚠️ 它是**排序权重不是硬过滤**，所以偏了也只是"排序变差"，不会"搜不到"。
+    """
+    pool = poi_pool.current_pool()
+    if pool is None:
+        return None
+
+    coords = [(float(p.lng), float(p.lat)) for p in pool.all() if p.lng and p.lat]
+    if not coords:
+        # 第一次搜索时池子是空的 → 不加中心点 = 与改动前行为完全一致
+        return None
+
+    best = min(coords, key=lambda a: sum(haversine_km(a, b) for b in coords))
+    return f"{best[0]:.6f},{best[1]:.6f}"
+
+
 def build_amap_tools(
     provider: AmapProvider,
     *,
@@ -100,7 +139,10 @@ def build_amap_tools(
         """
         target_city = city.strip() or default_city
         # 多取一些（`SEARCH_FETCH`）→ 重排 → 再截断到 `MAX_CANDIDATES`。
-        pois = await provider.search_poi(keyword, city=target_city, limit=SEARCH_FETCH)
+        # ⚠️ 中心点必须在 `record` **之前**算 —— 用"此前搜到的"锚点，不含本次结果（D75）。
+        pois = await provider.search_poi(
+            keyword, city=target_city, limit=SEARCH_FETCH, center=_search_center()
+        )
 
         # ★ 记进池子 —— 这是"模型没编造"能被证明的唯一途径。
         #   记的是**全量**（不是截断后的 8 条）：截断只发生在展示层，
