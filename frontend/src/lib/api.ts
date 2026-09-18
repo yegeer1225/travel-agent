@@ -5,7 +5,7 @@
  * 约定：
  * - 前端只按 code 分支，不匹配 msg（msg 是给人看的，会改）
  * - 404 = 不存在 或 无权，统一显示"不存在"，不区分
- * - 401 unauthorized → 清 token 跳登录（handleUnauthorized，全局兜底）
+ * - 401 unauthorized → GET：清 token 开弹窗（可重放）；写操作：跳登录页带 redirect（15.10/17.2）
  * - 429 rate_limited：读 detail.retry_after（秒），按钮置灰 + 倒计时
  */
 
@@ -39,7 +39,7 @@ import type {
   FavoriteItem,
   TargetType,
 } from '../types/contract'
-import { handleUnauthorized, waitForLogin, getToken } from './auth'
+import { handleUnauthorized, redirectToLogin, waitForLogin, getToken } from './auth'
 
 export class ApiError extends Error {
   readonly code: string
@@ -59,7 +59,7 @@ export class ApiError extends Error {
   }
 }
 
-/** 原始请求（一行逻辑别动）：401 → handleUnauthorized() 清 token 开弹窗 */
+/** 原始请求：401 → GET 弹窗（可重放）；写操作跳登录页（15.10/17.2，判 GET 用 init.method 别用 path 猜） */
 async function _raw<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(`/api${path}`, {
     ...init,
@@ -71,12 +71,17 @@ async function _raw<T>(path: string, init: RequestInit = {}): Promise<T> {
   })
   if (!res.ok) {
     const body = await res.json().catch(() => null)
+    // 🔴 5xx = 后端临时不可用（Vite 代理 502/500）：统一 code，页面按「服务不可用」提示，不暴露技术红字（17.5 验收 6）
     const err = new ApiError(
-      body?.error?.code ?? 'unknown',
-      body?.error?.msg ?? `HTTP ${res.status}`,
+      res.status >= 500 ? 'unavailable' : (body?.error?.code ?? 'unknown'),
+      res.status >= 500 ? `服务暂时不可用（HTTP ${res.status}）` : (body?.error?.msg ?? `HTTP ${res.status}`),
       body?.error?.detail ?? null,
     )
-    if (err.code === 'unauthorized') handleUnauthorized() // 🔴 401 全局兜底
+    if (err.code === 'unauthorized') {
+      const isGet = !init.method || init.method.toUpperCase() === 'GET'
+      if (isGet) handleUnauthorized() // GET：清 token 开弹窗，登录后由 request() 重放
+      else redirectToLogin() // 写操作：整页跳登录，带 redirect（不弹窗）
+    }
     throw err
   }
   return res.status === 204 ? (undefined as T) : res.json()
@@ -188,7 +193,7 @@ export async function uploadAvatar(file: File): Promise<AvatarUploadResponse> {
       body?.error?.msg ?? `HTTP ${res.status}`,
       body?.error?.detail ?? null,
     )
-    if (err.code === 'unauthorized') handleUnauthorized()
+    if (err.code === 'unauthorized') redirectToLogin() // POST：直接跳登录页（不能重放，15.10）
     throw err
   }
   return res.json()

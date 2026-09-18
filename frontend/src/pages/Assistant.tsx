@@ -176,6 +176,9 @@ export default function Assistant() {
         } catch (e) {
           if (e instanceof ApiError && e.code === 'invalid_param') {
             setErrorBar(`模型参数不合法：${e.message}`)
+          } else if (e instanceof ApiError && e.code === 'unavailable') {
+            // 后端临时不可用（停服/502）：不暴露技术红字，给明确提示（17.5 验收 6）
+            setErrorBar('连接中断，请重新发送')
           } else {
             setErrorBar(e instanceof Error ? e.message : String(e))
           }

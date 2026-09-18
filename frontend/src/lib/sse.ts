@@ -14,7 +14,7 @@
 import type { SSEEvent } from '../types/contract'
 import { isKnownEvent } from '../types/contract'
 import { ApiError } from './api'
-import { handleUnauthorized } from './auth'
+import { redirectToLogin } from './auth'
 
 export type SSEHandler = (evt: SSEEvent) => void
 
@@ -47,21 +47,30 @@ export async function streamSSE(
   }
   if (opts.lastEventId) headers['Last-Event-ID'] = opts.lastEventId
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-    signal, // ← ★ 严格模式下靠它取消，否则 effect 跑两次＝扣两次钱
-  })
+  // 🔴 连接层失败（断网 / 后端不可达 / Vite 代理拒绝）也属断流 → 交上层重连（17.5 验收 6）
+  let res: Response
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal, // ← ★ 严格模式下靠它取消，否则 effect 跑两次＝扣两次钱
+    })
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') throw e
+    throw new SseInterruptedError(null)
+  }
   if (!res.ok) {
-    // 统一错误形状（api.md 1.2）：429 rate_limited 读 detail.retry_after；401 → 清 token 跳登录
+    // 统一错误形状（api.md 1.2）：429 rate_limited 读 detail.retry_after；401 → 聊天流是 POST，不能重放 → 跳登录页（17.2）
     const body = await res.json().catch(() => null)
     const err = new ApiError(
       body?.error?.code ?? 'unknown',
       body?.error?.msg ?? `HTTP ${res.status}`,
       body?.error?.detail ?? null,
     )
-    if (err.code === 'unauthorized') handleUnauthorized()
+    if (err.code === 'unauthorized') redirectToLogin()
+    // 🔴 服务端 5xx（后端停掉时 Vite 代理给 502/500）= 临时不可用，算断流走重连；4xx 保持 ApiError（不可重连）
+    if (res.status >= 500) throw new SseInterruptedError(null)
     throw err
   }
   if (!res.body) throw new Error('响应没有 body，无法流式读取')
@@ -70,31 +79,39 @@ export async function streamSSE(
   const decoder = new TextDecoder()
   let buf = ''
   let gotDone = false
+  // 🔴 lastEventId 必须在 try 外面声明——循环里赋值，写在 try 内 catch 就看不见了（17.3）
   let lastEventId: string | null = null
 
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buf += decoder.decode(value, { stream: true })
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
 
-    // 按"空行"切帧；最后一段可能不完整，留在 buf 里等下一块
-    const frames = buf.split('\n\n')
-    buf = frames.pop() ?? ''
+      // 按"空行"切帧；最后一段可能不完整，留在 buf 里等下一块
+      const frames = buf.split('\n\n')
+      buf = frames.pop() ?? ''
 
-    for (const frame of frames) {
-      let dataLine: string | undefined
-      for (const line of frame.split('\n')) {
-        if (line.startsWith('id:')) lastEventId = line.slice(3).trim()
-        else if (line.startsWith('data:')) dataLine = line
-        // 跳过 `: ping` 心跳（以 `:` 开头的注释行）
+      for (const frame of frames) {
+        let dataLine: string | undefined
+        for (const line of frame.split('\n')) {
+          if (line.startsWith('id:')) lastEventId = line.slice(3).trim()
+          else if (line.startsWith('data:')) dataLine = line
+          // 跳过 `: ping` 心跳（以 `:` 开头的注释行）
+        }
+        if (!dataLine) continue
+        const evt: unknown = JSON.parse(dataLine.slice(5).trim())
+        const typed = evt as { type: string }
+        if (!isKnownEvent(typed)) continue // 未知 type 必须忽略
+        if (typed.type === 'done') gotDone = true
+        onEvent(typed)
       }
-      if (!dataLine) continue
-      const evt: unknown = JSON.parse(dataLine.slice(5).trim())
-      const typed = evt as { type: string }
-      if (!isKnownEvent(typed)) continue // 未知 type 必须忽略
-      if (typed.type === 'done') gotDone = true
-      onEvent(typed)
     }
+  } catch (e) {
+    // 🔴 主动取消（用户离开页面 / React 严格模式卸载）必须原样抛出 —— 它不是断流，不能触发重连（17.3）
+    if (e instanceof DOMException && e.name === 'AbortError') throw e
+    // 其余（网络中断、连接被掐、解码失败）一律算断流 → 带上最后的 id 交给上层重连
+    throw new SseInterruptedError(lastEventId)
   }
   if (!gotDone) throw new SseInterruptedError(lastEventId)
   return { lastEventId }

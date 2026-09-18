@@ -55,6 +55,12 @@ export function handleUnauthorized(): void {
   onUnauth?.()
 }
 
+/** 写操作 / 页面级 401：跳登录页 + 带回跳地址（**不弹窗**）—— 15.10 / 17.2 原文照抄 */
+export function redirectToLogin(): void {
+  const from = window.location.pathname + window.location.search
+  window.location.assign(`/login?redirect=${encodeURIComponent(from)}`)
+}
+
 /**
  * 等这次登录有结果。
  * 🔴 并发 401 必须共享同一个 Promise —— 否则 N 个请求 = N 个弹窗，
