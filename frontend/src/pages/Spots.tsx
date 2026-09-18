@@ -1,10 +1,21 @@
 import { useEffect, useRef, useState } from 'react'
-import { useLocation, useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import type { SpotCard } from '../types/contract'
-import { addFavorite, searchSpots, ApiError } from '../lib/api'
+import { addFavorite, listSpots, searchSpots, ApiError } from '../lib/api'
 import { getToken } from '../lib/auth'
 
+/** 原始编码如「风景名胜;寺庙道观」→ 取最后一段显示（19.3） */
+function lastType(t: string | null): string | null {
+  if (!t) return null
+  const parts = t.split(/[;；]/).map((x) => x.trim()).filter(Boolean)
+  return parts.length ? parts[parts.length - 1] : null
+}
+
+/** 默认态快捷搜索词（19.4）：搜索入口不是数据，点 = 填词 + 真实搜索一次 */
+const QUICK_WORDS = ['宽窄巷子', '大熊猫繁育研究基地', '武侯祠', '锦里', '金沙遗址', '人民公园', '文殊院', '东郊记忆']
+
 function ResultCard({ s, hasToken }: { s: SpotCard; hasToken: boolean }) {
+  const nav = useNavigate()
   const color = ['pop-yellow', 'pop-cyan', 'pop-blue', 'pop-green'][s.poi_id.length % 4]
   const [favMsg, setFavMsg] = useState<string | null>(null)
   const [favBusy, setFavBusy] = useState(false)
@@ -23,8 +34,13 @@ function ResultCard({ s, hasToken }: { s: SpotCard; hasToken: boolean }) {
     }
   }
 
+  const typeLabel = lastType(s.typecode)
+
   return (
-    <div className="card p-4 flex gap-4 items-start">
+    <div
+      className="card p-4 flex gap-4 items-start cursor-pointer transition-colors hover:bg-pop-yellow/20"
+      onClick={() => nav(`/spots/${s.poi_id}`)} // 🔴 整卡可点进详情（19.3）
+    >
       {/* 左侧：photos[0] 真图（onError 隐藏，回退色块+站名，不用灰底占位图） */}
       <div
         className="w-24 h-20 shrink-0 flex items-center justify-center rounded-[4px] border border-ink relative overflow-hidden"
@@ -52,12 +68,15 @@ function ResultCard({ s, hasToken }: { s: SpotCard; hasToken: boolean }) {
         </div>
         <div className="flex items-center gap-3 mt-2 text-[12px]">
           {s.cost_per_person !== null && <span>人均 ¥{s.cost_per_person}</span>}
-          {s.typecode && <span className="px-2 py-0.5 border border-ink rounded-[2px] text-muted">{s.typecode}</span>}
+          {typeLabel && <span className="px-2 py-0.5 border border-ink rounded-[2px] text-muted">{typeLabel}</span>}
           {hasToken && (
             <>
               <button
                 className="btn-outline !text-[11px] !px-2.5 !py-1"
-                onClick={() => void onFavorite()}
+                onClick={(e) => {
+                  e.stopPropagation() // 🔴 点收藏不触发卡片跳转（19.3）
+                  void onFavorite()
+                }}
                 disabled={favBusy}
               >
                 {favBusy ? '收藏中' : favMsg === '已收藏' ? '✓ 已收藏' : '收藏'}
@@ -71,7 +90,46 @@ function ResultCard({ s, hasToken }: { s: SpotCard; hasToken: boolean }) {
   )
 }
 
-/** 景点搜索页：搜索页不是列表页 —— 进来没有数据，默认态显示引导文案 */
+/** 默认态封面卡（与首页「猜你喜欢」同款视觉）：整卡可点进详情（GET /spots，2026-09-18） */
+function CoverCard({ s }: { s: SpotCard }) {
+  const nav = useNavigate()
+  const color = ['pop-yellow', 'pop-cyan', 'pop-blue', 'pop-green'][s.poi_id.length % 4]
+  return (
+    <div
+      className="card overflow-hidden cursor-pointer transition-transform hover:raise"
+      onClick={() => nav(`/spots/${s.poi_id}`)}
+      title={s.name}
+    >
+      {/* 封面：photos[0] 真图（onError 隐藏，回退色块+站名，不用灰底占位图） */}
+      <div
+        className="h-[150px] flex items-center justify-center relative overflow-hidden"
+        style={{ background: `var(--color-${color})` }}
+      >
+        {s.photos[0] ? (
+          <img
+            src={s.photos[0]}
+            alt={s.name}
+            className="absolute inset-0 w-full h-full object-cover"
+            onError={(e) => {
+              e.currentTarget.style.display = 'none'
+            }}
+          />
+        ) : null}
+        <span className="font-display font-bold text-[26px] tracking-wide uppercase">{s.name.slice(0, 4)}</span>
+      </div>
+      <div className="p-4 pb-[18px]">
+        <div className="flex justify-between items-center gap-2">
+          <h3 className="font-bold text-[14px] truncate">{s.name}</h3>
+          {s.rating && <b className="text-[13px] text-muted shrink-0">评分 {s.rating}</b>}
+        </div>
+        <div className="mt-1 text-[12px] text-muted truncate">{s.district ?? s.city}</div>
+        {s.cost_per_person !== null && <div className="mt-0.5 text-[12px] text-muted">人均 ¥{s.cost_per_person}</div>}
+      </div>
+    </div>
+  )
+}
+
+/** 景点页：默认态平铺收录库（GET /spots），搜索后切结果列表（D70：搜的是本站收录） */
 export default function Spots() {
   // 登录后跳回本页（路由变化）→ 重渲染 → hasToken 重新求值（P3：不再只算一次）
   useLocation()
@@ -87,6 +145,26 @@ export default function Spots() {
   const [meta, setMeta] = useState<{ source: string; cached: boolean } | null>(null)
   // 请求序列保护：自动搜索（URL 参数）与手动搜索并发时，只认最后一次发出的（过期响应丢弃）
   const seqRef = useRef(0)
+  // 默认态数据（GET /spots 全量分页，2026-09-18）
+  const [list, setList] = useState<SpotCard[] | null>(null)
+  const [listTotal, setListTotal] = useState(0)
+  const [listError, setListError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    listSpots(50)
+      .then((res) => {
+        if (!alive) return
+        setList(res.items)
+        setListTotal(res.total)
+      })
+      .catch((e: unknown) => {
+        if (alive) setListError(e instanceof Error ? e.message : String(e))
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
 
   const runSearch = async (kw: string, cityName: string) => {
     const seq = ++seqRef.current
@@ -162,13 +240,49 @@ export default function Spots() {
       {/* 错误提示（显示在表单下方） */}
       {error && <div className="mt-3 text-status-fail text-[13px]">{error}</div>}
 
-      {/* 默认态：没有搜索关键词 → 引导文案，不硬凑卡片 */}
+      {/* 默认态：平铺收录库封面卡（与首页猜你喜欢同款视觉），整卡可点进详情。
+          数据来自 GET /spots（真实收录库），不是硬凑 —— total 也是后端给的。
+          快捷词保留：点 = 填词 + 真实搜索一次，是搜索入口不是装饰 */}
       {!error && items === null && !loading && (
-        <div className="mt-16 text-center">
-          <div className="font-display font-bold text-lg mb-2">输入关键词开始搜索</div>
-          <p className="text-muted text-[14px]">
-            例如「成都 博物馆」「广州 长隆」「西湖」… 搜索本站已收录的景点
-          </p>
+        <div className="mt-8">
+          {listError && <div className="text-status-fail text-[13px]">收录列表加载失败：{listError}</div>}
+          {!listError && list === null && <div className="text-muted">加载中…</div>}
+          {list !== null && (
+            <>
+              <div className="flex items-center gap-3 mb-4 text-[12px] text-muted">
+                <span>共收录 {listTotal} 个景点</span>
+                <span>点击卡片查看详情</span>
+              </div>
+              {list.length === 0 ? (
+                <div className="mt-12 text-center text-muted">
+                  收录库暂无景点，试试上方搜索
+                </div>
+              ) : (
+                <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+                  {list.map((s) => (
+                    <CoverCard key={s.poi_id} s={s} />
+                  ))}
+                </div>
+              )}
+              <div className="mt-8">
+                <div className="font-bold text-[14px] mb-3">没找到想去的？搜一下</div>
+                <div className="flex flex-wrap gap-2">
+                  {QUICK_WORDS.map((w) => (
+                    <button
+                      key={w}
+                      className="btn-outline !text-[13px] !px-3 !py-1.5"
+                      onClick={() => {
+                        setKeyword(w) // 🔴 点 = 填入输入框 + 真实搜索一次（19.4）
+                        void runSearch(w, '')
+                      }}
+                    >
+                      {w}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
         </div>
       )}
 

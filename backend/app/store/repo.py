@@ -951,6 +951,24 @@ class SpotRepo:
             rows = cur.fetchall()
         return [self._row_to_card(r) for r in rows], total
 
+    def list_all(self, *, limit: int = 20, offset: int = 0) -> tuple[list[SpotCard], int]:
+        """收录库全量分页（`GET /spots`，2026-09-18）。
+
+        排序与 `search` 保持同一套可解释依据（去掉前缀项）：**评分降序 → 名称**，
+        缺评分排最后不当 0 分（D20：不发明"热度"）。空库返回 `([], 0)` 是正确行为。
+        """
+        with closing(self._conn_factory()) as conn, conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) AS n FROM spots")
+            total = int(cur.fetchone()["n"])
+            cur.execute(
+                f"SELECT {self._COLUMNS} FROM spots "
+                "ORDER BY CAST(NULLIF(rating, '') AS DECIMAL(4,2)) DESC, name "
+                "LIMIT %s OFFSET %s",
+                (limit, offset),
+            )
+            rows = cur.fetchall()
+        return [self._row_to_card(r) for r in rows], total
+
     def get(self, poi_id: str) -> SpotCard | None:
         with closing(self._conn_factory()) as conn, conn.cursor() as cur:
             cur.execute(

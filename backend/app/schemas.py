@@ -793,6 +793,20 @@ class SpotSearchResponse(BaseModel):
     原来的进程内缓存只为省高德配额（D35 的 0.45s 出站限速），本地路径不需要它。"""
 
 
+class SpotListResponse(BaseModel):
+    """`GET /spots` 收录库全量列表（2026-09-18）。
+
+    为什么不是复用 `SpotSearchResponse`：搜索响应里的 `source` / `cached` 是
+    **搜索语义**（解释"这条结果从哪来、走没走缓存"）。列表接口的数据来源**只有
+    收录库一条路**，没有第二种可能 → 不带这两个字段，前端也不用做按值分支。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[SpotCard] = Field(default_factory=list)
+    total: int = Field(default=0, ge=0)
+
+
 class HeroSlide(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -1094,6 +1108,7 @@ __all__ = [
     "AmapImportResponse",
     "SpotCard",
     "SpotSearchResponse",
+    "SpotListResponse",
     "HeroSlide",
     "HomeResponse",
     "GuideListItem",

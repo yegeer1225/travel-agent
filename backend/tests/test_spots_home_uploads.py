@@ -175,6 +175,33 @@ def test_search_requires_auth(api):
     assert bare.get("/api/spots/search", params={"keywords": "宽窄"}).status_code == 401
 
 
+# ── /spots（列表，2026-09-18）──────────────────────────────
+
+
+def test_spot_list_returns_library_only(api):
+    """列表 = 收录库全量：B1/B2 两条，provider 的 B3~B6 绝不能混进来。"""
+    r = api.get("/api/spots")
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["total"] == 2
+    assert {s["poi_id"] for s in data["items"]} == {"B1", "B2"}
+    # 列表响应没有搜索语义字段（source/cached 是 SpotSearchResponse 的）
+    assert "source" not in data
+    assert "cached" not in data
+    assert api.fake_provider.search_log == [], "列表路径不该碰 provider（零出站）"
+
+
+def test_spot_list_paging(api):
+    data = api.get("/api/spots", params={"limit": 1}).json()
+    assert data["total"] == 2
+    assert len(data["items"]) == 1
+
+
+def test_spot_list_requires_auth(api):
+    bare = TestClient(api.app)
+    assert bare.get("/api/spots").status_code == 401
+
+
 # ── /spots/{poi_id} ────────────────────────────────────────
 
 

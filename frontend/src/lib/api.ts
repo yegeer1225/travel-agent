@@ -20,6 +20,8 @@ import type {
   RecheckResponse,
   HomeResponse,
   SpotSearchResponse,
+  SpotListResponse,
+  SpotCard,
   TripOp,
   RegisterRequest,
   LoginRequest,
@@ -200,6 +202,12 @@ export async function uploadAvatar(file: File): Promise<AvatarUploadResponse> {
 }
 
 // ── 景点 ────────────────────────────────────────────────
+/** 收录库全量分页（2026-09-18）：景点页默认态平铺用。响应无 source/cached（那是搜索语义） */
+export function listSpots(limit = 50, offset = 0): Promise<SpotListResponse> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+  return request<SpotListResponse>(`/spots?${params.toString()}`)
+}
+
 export function searchSpots(
   keywords: string,
   city?: string,
@@ -209,6 +217,11 @@ export function searchSpots(
   const params = new URLSearchParams({ keywords, limit: String(limit), offset: String(offset) })
   if (city) params.set('city', city)
   return request<SpotSearchResponse>(`/spots/search?${params.toString()}`)
+}
+
+/** 景点详情（19 节）：🔴 需登录 401；响应 source 可能 local/amap/mock（SpotCard 契约无 source 字段，前端不显示） */
+export function getSpot(id: string): Promise<SpotCard> {
+  return request<SpotCard>(`/spots/${id}`)
 }
 
 // ── 行程：高德 APP 唤端（M7 🔵）──────────────────────────

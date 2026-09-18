@@ -6,12 +6,13 @@
 > 配套：`backend/app/schemas.py`（数据结构，**唯一事实源**）｜`docs/sample_trip.json`（真实响应样例）
 >
 > 🔒 **已冻结：2026-09-15**（用户过签 7 项关键判断；原「悬而未决」的 6 项全部闭合，决定性内容见 `DECISIONS.md` D25~D31）
-> 最后更新：**2026-09-17**
+> 最后更新：**2026-09-18**
 
 **契约变更记录（按时间倒序）**
 
 | 日期 | 改了什么 | 影响 | 决策 |
 |---|---|---|---|
+| 2026-09-18 | 新增 `GET /spots`（收录库全量分页）与 `SpotListResponse`；**作废 3.5.1 里"默认态不许平铺"条款** —— 之前禁平铺是因为"前端拿不到真实收录总数"，现在列表接口给了真 `total`，平铺的是真实收录数据 | 前端：景点页默认态从"引导文案"改为封面卡网格（同首页猜你喜欢视觉，整卡可点进详情）；`types.ts`/`contract.ts` 已重生成 | 用户拍板（对话 2026-09-18 晚） |
 | 2026-09-17 | `GET /spots/search` 数据源改为**收录库**；`SpotSearchResponse.source` 枚举新增 **`local`**（现在恒为它）；`cached` 恒 `false`；新增 3.5.1 说明 `GET /spots/{poi_id}` 的回落顺序 | 前端：`source` 判等要加上 `local`；**空结果现在代表"本库没收录"，不再代表"高德搜不到"** → 空态文案要改 | A47 / D70 |
 | 2026-09-16 | `guides` 加 `source_trip_id` / `idempotency_key`；`POST /trips/{id}/publish-as-guide` | 详见第十四节 | A46 / D61~D63 |
 
@@ -67,6 +68,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJ1aWQiOjF9.xxx
 | `GET /guides/{id}` | 🟢 公开 | 攻略详情 |
 | `GET /guides/{id}/comments` | 🟢 公开 | 评论列表 |
 | `GET /likes?target_type=&target_id=` | 🟢 公开 | 查点赞状态 |
+| `GET /spots` | 🔴 **401** | 收录库列表（限流键同 search，含 `user_id`） |
 | `GET /spots/search` | 🔴 **401** | 景点搜索（限流键也含 `user_id`） |
 | `GET /spots/{poi_id}` | 🔴 **401** | 景点详情 |
 | `POST /sessions/{id}/chat` | 🔴 **401** | 聊天（最贵接口） |
@@ -146,7 +148,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJ1aWQiOjF9.xxx
 | HTTP | `code` | 什么时候 | 前端该怎么表现 |
 |---|---|---|---|
 | 400 | `invalid_param` | 参数不合法（时间格式错、字段缺失、`ops` 为空…） | 把 `msg` 直接显示在表单下方 |
-| 400 | `keyword_required` | 景点搜索关键词为空 | ❌ **不该发生** —— 前端在关键词为空时**不要发请求**，直接显示引导文案 |
+| 400 | `keyword_required` | 景点搜索关键词为空 | ❌ **不该发生** —— 前端在关键词为空时**不要发请求**，保持默认态（收录列表）即可 |
 | 401 | `unauthorized` | token 缺失/过期/签名错（M9 起） | 清本地 token。**`GET` → 弹登录弹窗（不跳页）+ 登录后自动重放**；**写操作 / SSE / 页面级 → 跳登录页** —— 见 1.1.3 |
 | 404 | `not_found` | **不存在 或 无权访问**（见下） | 显示"页面不存在"，**不要提示"无权限"** |
 | 409 | `conflict` | 用户名已存在、攻略标题重复 | 显示 `msg` |
@@ -195,7 +197,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJ1aWQiOjF9.xxx
 | **同一 session 并发流** | 会话 | **同时只允许 1 个**（第二个 → `429`） |
 | `POST /trips/paste` | 用户 | **20 / 小时** |
 | `POST /trips/{id}/recheck` | 用户 | **60 / 小时** |
-| `GET /spots/search` | 用户 | **120 / 分钟** |
+| `GET /spots`·`GET /spots/search` | 用户 | **120 / 分钟**（同一条规则：都是毫秒级本地读） |
 | `POST /auth/register`·`login` | IP | **10 / 分钟** |
 | `POST /users/me/avatar` | 用户 | **5 / 小时** |
 | 全局兜底 | IP | **300 / 分钟** |
@@ -274,8 +276,9 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJ1aWQiOjF9.xxx
 
 | 方法 | 路径 | 阶段 | 说明 |
 |---|---|---|---|
-| GET | `/spots/search?keywords=&city=&limit=&offset=` | M4 🟡 | 代理高德 POI 搜索（带进程内缓存）→ `SpotSearchResponse` |
-| GET | `/spots/{poi_id}` | M8 🟡 | POI 详情 → `SpotCard` |
+| GET | `/spots?limit=&offset=` | 2026-09-18 🟢 | 收录库全量分页 → `SpotListResponse`（景点页默认态平铺） |
+| GET | `/spots/search?keywords=&city=&limit=&offset=` | M4 🟡 | 搜本站收录库（D70，**不回落高德**）→ `SpotSearchResponse` |
+| GET | `/spots/{poi_id}` | M8 🟡 | POI 详情（收录库 → 回落 provider）→ `SpotCard` |
 
 ### 2.5 首页
 
@@ -454,9 +457,20 @@ Authorization: Bearer <token>
 与 search 的"不回落"是两回事：这是"**按 id 拿一条**"，行程卡片 / 收藏 / 攻略里的
 `poi_id` 可能指向**未收录**的地点（那些是高德侧的 id），此时 404 会显得像 bug。
 
-🔴 **本项目是搜索页，不是列表页**：默认态是空，前端必须显示引导文案，
-❌ **不许硬凑几张卡**、❌ **不许写"共收录 N 个景点"**（前端拿不到真实收录总数 ——
-真要显示，得后端加接口，现在**没加**）。
+### 3.5.2 `GET /spots`（收录库列表，2026-09-18 新增）
+
+| 参数 | 必填 | 说明 |
+|---|---|---|
+| `limit` / `offset` | ❌ | 默认 `20` / `0`，`limit` 上限 `50`（前端默认态直接传 50） |
+
+```json
+{ "items": [ { "poi_id": "B001C07VJ2", "name": "成都武侯祠博物馆", "...": "SpotCard 全字段" } ], "total": 10 }
+```
+
+- 排序 = **评分降序 → 名称**（缺评分排最后不当 0 分，与 search 同一套可解释依据）
+- ⚠️ 响应**没有 `source` / `cached`** —— 那是搜索语义字段，列表只有收录库一条路
+- ❌ 禁止手写假数据凑卡 —— 这条纪律**不变**，变的是：之前禁平铺是因为"前端拿不到真实收录总数"，
+  现在后端给了真 `total`，默认态平铺的是**真实收录数据**（用户拍板，2026-09-18 晚）
 
 ### 3.6 `GET /home`
 

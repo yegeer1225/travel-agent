@@ -139,6 +139,13 @@ export interface Validation {
   remaining: ValidationIssue[]
 }
 
+export interface SkeletonDay {
+  day: number
+  date: string | null
+  theme: string
+  stops: string[]
+}
+
 export interface Trip {
   trip_id: string
   session_id: string | null
@@ -297,6 +304,13 @@ export interface TokenEvent {
   text: string
 }
 
+export interface SkeletonEvent {
+  type: "skeleton"
+  title: string
+  days: SkeletonDay[]
+  note: string
+}
+
 export interface TripEvent {
   type: "trip"
   trip: Trip
@@ -366,6 +380,11 @@ export interface SpotSearchResponse {
   total: number
   source: "amap" | "mock" | "local"
   cached: boolean
+}
+
+export interface SpotListResponse {
+  items: SpotCard[]
+  total: number
 }
 
 export interface HomeResponse {
@@ -518,6 +537,7 @@ export type SSEEvent =
   | CheckEvent
   | DoneEvent
   | ErrorEvent
+  | SkeletonEvent
 
 /** 前端必须**忽略未知 type**（方便后端加新事件而不破坏老前端） */
 export function isKnownEvent(evt: { type: string }): evt is SSEEvent {
@@ -531,5 +551,6 @@ export function isKnownEvent(evt: { type: string }): evt is SSEEvent {
     'check',
     'done',
     'error',
+    'skeleton',
   ].includes(evt.type)
 }

@@ -510,6 +510,11 @@ class InMemorySpotStore:
         )
         return [self._to_card(p) for p in rows[offset : offset + limit]], len(rows)
 
+    def list_all(self, *, limit: int = 20, offset: int = 0) -> tuple[list[SpotCard], int]:
+        """与 SQL 版 `list_all` 对齐：评分高优先（空评排最后）→ 名称字典序。"""
+        rows = sorted(self._rows.values(), key=lambda p: (-self._rating_key(p), p.name))
+        return [self._to_card(p) for p in rows[offset : offset + limit]], len(rows)
+
     def get(self, poi_id: str) -> SpotCard | None:
         poi = self._rows.get(poi_id)
         return self._to_card(poi) if poi else None

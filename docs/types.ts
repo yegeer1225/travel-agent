@@ -382,6 +382,11 @@ export interface SpotSearchResponse {
   cached: boolean
 }
 
+export interface SpotListResponse {
+  items: SpotCard[]
+  total: number
+}
+
 export interface HomeResponse {
   hero: HeroSlide[]
   recommended: SpotCard[]
@@ -532,6 +537,7 @@ export type SSEEvent =
   | CheckEvent
   | DoneEvent
   | ErrorEvent
+  | SkeletonEvent
 
 /** 前端必须**忽略未知 type**（方便后端加新事件而不破坏老前端） */
 export function isKnownEvent(evt: { type: string }): evt is SSEEvent {
@@ -545,5 +551,6 @@ export function isKnownEvent(evt: { type: string }): evt is SSEEvent {
     'check',
     'done',
     'error',
+    'skeleton',
   ].includes(evt.type)
 }
