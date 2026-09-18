@@ -287,12 +287,16 @@ async def main() -> int:
         help="模拟用户插话（steering），可重复传多次",
     )
     parser.add_argument("--today", help="固定'今天'为某个日期（YYYY-MM-DD），便于复现")
+    parser.add_argument(
+        "--model",
+        help="会话级模型覆盖（D9/D55，例如 qwen3.7-flash）—— 不传用 .env 默认档",
+    )
     parser.add_argument("--json", action="store_true", help="直接打印终态 JSON（调试用）")
     args = parser.parse_args()
 
     today = Date.fromisoformat(args.today) if args.today else None
 
-    runtime = build_runtime(today=today)
+    runtime = build_runtime(today=today, model=args.model)
     graph = build_graph(runtime)
     state = await graph.ainvoke(
         initial_state(args.message, pending_messages=args.pending),

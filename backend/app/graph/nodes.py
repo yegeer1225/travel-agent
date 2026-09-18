@@ -46,6 +46,7 @@ responding to each 'tool_call_id'`）。
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from datetime import date as Date
 from datetime import datetime
@@ -90,6 +91,8 @@ from app.graph.subagent import (
     subagent_trace_scope,
 )
 from app.utils import text_of
+
+logger = logging.getLogger(__name__)
 
 # ══════════════════════════════════════════════════════════════
 #  D25 的三个上限
@@ -515,7 +518,6 @@ class Nodes:
 
         pool = _pool_from_state(state)
         results: list[ToolMessage] = []
-        errors: list[str] = []
 
         # ── 执行预算 ──
         # 🔴 **2026-09-16 实测补上的缺口**：第一次跑真实模型拿到了
@@ -585,11 +587,14 @@ class Nodes:
                     raw = await tool.ainvoke(args, config=config)
                     text = raw if isinstance(raw, str) else json.dumps(raw, ensure_ascii=False)
                 except Exception as exc:  # noqa: BLE001 —— 异常也必须变成回应
+                    # 🔴 traceback 必须进日志：SSE 层只给模型/用户看异常类名，
+                    #    不留堆栈的话，偶发异常（如 2026-09-18 实测的 AttributeError）
+                    #    永远钉死不到行。
+                    logger.error("工具 %s 执行失败（args=%s）", name, args, exc_info=True)
                     text = (
                         f"工具「{name}」执行失败：{type(exc).__name__}: {exc}\n"
                         f"可以先换个关键词或换个工具试试，不要因此就凭记忆编数据。"
                     )
-                    errors.append(f"{name}: {exc}")
 
                 results.append(ToolMessage(content=text, tool_call_id=call_id, name=name))
 
@@ -603,8 +608,13 @@ class Nodes:
             "subagent_trace": sub_trace,  # add reducer → 只追加本次新增，历史由 state 保着
             "searched_keywords": keywords_ledger,  # D71：覆盖语义（列表本身已累计）
         }
-        if errors:
-            update["error"] = "工具执行出错：" + "；".join(errors)
+        # ⚠️ 工具执行失败**不写** `state["error"]`（2026-09-18 修）：
+        # 工具错误是**模型可自愈的瞬时错误** —— 失败文本已经通过 ToolMessage 回喂模型
+        # （它下一轮就会改对重试），UI 也已经通过 ToolResultEvent(ok=False) 展示。
+        # 写进 state["error"] 的后果：模型重试成功后错误**仍然留在终态**，
+        # 流结束被当成最终错误发 ErrorEvent —— 用户看到行程和判据都完整给出了，
+        # 末尾却甩一行"工具执行出错"，行程到底成没成功说不清。
+        # `state["error"]` 只留给**真致命**的失败（模型调用失败、草稿不合格等）。
         return update
 
     # ══════════════════════════════════════════════════════════

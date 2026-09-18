@@ -358,7 +358,11 @@ def test_tool_step_turns_exception_into_tool_message():
     assert len(out["messages"]) == 1
     assert "执行失败" in out["messages"][0].content
     assert "不要因此就凭记忆编数据" in out["messages"][0].content
-    assert "error" in out
+    # 🔴 工具错误**不写** state["error"]（2026-09-18 修）：它是模型可自愈的瞬时错误
+    #    （下一轮重试成功很常见），写进去会污染终态 —— 行程成功产出了，
+    #    流结束却因为残留错误补发一个 ErrorEvent（实测：calc_distance 参数名
+    #    打错 → 模型重试成功 → 末尾仍甩一行"工具执行出错"）。
+    assert "error" not in out
 
 
 def test_tool_step_records_pois_into_state_snapshot():
