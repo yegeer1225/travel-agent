@@ -1416,7 +1416,7 @@ saver 是进程级单例 —— **测试里不能用默认 factory**（会真连
 
 ---
 
-### D60 · 默认模型切回 deepseek-flash：百炼免费但慢 14 倍　`M9 后半` 2026-09-16
+### D60 · 默认模型切回 deepseek-flash：百炼免费但慢 14 倍　`M9 后半` 2026-09-16　`→ 部分被 D78 推翻（2026-09-18 额度耗尽）`
 
 > **决定**：`.env` 的 `LLM_MODEL_TOOL/PLAN` 默认档从 `qwen3.7-flash`（D58）切回
 > `deepseek-flash`。**部分推翻 D58**：qwen3.7-flash/plus 仍在 `MODEL_REGISTRY` 里
@@ -1873,6 +1873,28 @@ saver 是进程级单例 —— **测试里不能用默认 factory**（会真连
 **实测**：首结果 **9m48s → 11.5s**（parse_intent 7s + 骨架 4.5s）。追问轮（缺目的地/日期）不发骨架。
 
 **重审触发**：① 骨架与成稿差异被用户抱怨 → 做 diff 高亮或砍 date 字段只留 theme；② 模型档位换更快的 → 骨架可并入 parse_intent 一次调用。
+
+---
+
+### D78 · 默认模型切回百炼 `qwen3.7-flash`：deepseek-v4-flash-0731 额度耗尽　`部分再推翻 D60`　2026-09-18
+
+> **决定**：`.env` 的 `LLM_MODEL_TOOL/PLAN` 从百炼托管的 `deepseek-v4-flash-0731`
+> 切回 `qwen3.7-flash`（D58 档）。触发 = 百炼侧 deepseek-v4-flash-0731 **免费额度耗尽 403**
+> （2026-09-18 soft_check 0.2s 静默失败破案确认）。DeepSeek **官方开放平台** key
+> （`LLM_API_KEY` + `api.deepseek.com`）保留，账户还剩 1 元 —— 只留作一次性测试/演示，
+> 想用就把 `LLM_MODEL_*` 改回 `deepseek-flash`，registry 自动路由。
+
+**⚠️ 漂移自曝**：D60 白纸黑字写"切回官方 `deepseek-flash`"，但线上 `.env` 实际跑的
+是**百炼托管的 `deepseek-v4-flash-0731`**（D60 之后某次改动没回写记录）——
+本条顺带把漂移修正。教训：`.env` 改默认档的每次切换都要在 D 编号里留痕。
+
+| 替代方案 | 否决理由 |
+|---|---|
+| 充值百炼 / DeepSeek | 免费额度按模型独立还有 qwen3.7-flash 的 100 万 token；开发期不值得花钱 |
+| 保持 deepseek 官方档（1 元余额） | 1 元只够一次性测试；日常评测/e2e 烧它等于主动花钱 |
+
+**代价**：默认档回到"慢"侧 —— soft_check 单次 ~50s（D60 实测 51.8s），recheck/paste 同步等待变长；评测报告 label 如实写 `qwen3.7-flash`。
+**重审触发**：qwen3.7-flash 额度也耗尽 → 换下一个 qwen 快照（新模型自带新额度，改 `MODEL_REGISTRY` + `.env` 两行）；或用户拍板充值。
 
 ---
 
