@@ -138,56 +138,19 @@ def test_every_status_has_an_icon(status: str) -> None:
 
 
 # ══════════════════════════════════════════════════════════════
-#  M4：子 agent trace 的渲染
+#  P1（D79）后子 agent trace 已退役 —— 原三个 _fmt_trace 测试随之删除；
+#  run_cli 改印台账（searched_keywords）。
 # ══════════════════════════════════════════════════════════════
 
 
-def test_fmt_trace_shows_searches_keywords_and_returns() -> None:
-    record = {
-        "objective": "成都的历史古迹",
-        "city": "成都",
-        "rounds": 2,
-        "searches": 2,
-        "keywords": ["武侯祠", "锦里"],
-        "returned": 3,
-        "degraded": False,
-        "llm_failed": False,
+def test_print_result_shows_searched_keywords(capsys) -> None:
+    """台账是"搜索花了多少功夫"现在唯一可见的地方，必须印出来。"""
+    state = {
+        "requirements": {"destination": "成都"},
+        "searched_keywords": ["成都|武侯祠", "成都|火锅"],
     }
-    text = run_cli._fmt_trace(record)
-    assert "成都的历史古迹" in text
-    assert "武侯祠、锦里" in text
-    assert "2 次搜索" in text
-    assert "返回 3 条" in text
-    assert "降级" not in text and "失败" not in text, "正常路径不该出现警告标记"
+    run_cli.print_result(state)
+    out = capsys.readouterr().out
+    assert "【已搜关键词】2 个" in out
+    assert "成都|武侯祠" in out
 
-
-def test_fmt_trace_marks_degradation_loudly() -> None:
-    """🔴 降级必须显眼 —— 静默降级让人分不清"模型笨"还是"输入本来就烂"。"""
-    record = {
-        "objective": "任务",
-        "city": "成都",
-        "rounds": 4,
-        "searches": 3,
-        "keywords": ["景点"],
-        "returned": 8,
-        "degraded": True,
-        "llm_failed": False,
-    }
-    assert "降级" in run_cli._fmt_trace(record)
-
-
-def test_fmt_trace_handles_empty_keywords() -> None:
-    """一个词都没搜成时不能打出「关键词：」后面一片空白还带顿号。"""
-    record = {
-        "objective": "任务",
-        "city": "成都",
-        "rounds": 1,
-        "searches": 0,
-        "keywords": [],
-        "returned": 0,
-        "degraded": False,
-        "llm_failed": True,
-    }
-    text = run_cli._fmt_trace(record)
-    assert "关键词：无" in text
-    assert "规划失败" in text

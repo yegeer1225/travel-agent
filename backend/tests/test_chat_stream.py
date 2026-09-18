@@ -1,11 +1,7 @@
-"""M6 流映射测试：真图（假 LLM）跑 `graph_chat_stream`，断言 9 种 SSE 事件的映射。
+"""M6 流映射测试：真图（假 LLM）跑 `graph_chat_stream`，断言 SSE 事件的映射。
 
 不连 HTTP（那是 `test_chat_route.py` 的事）、不连库、不连 LLM。
 这里盯的是**翻译规则**：LangGraph 内部事件 → 前端事件，顺序/形状/过滤是否正确。
-
-🔴 最容易静默错的一处：**子 agent 内部的 search_poi 也会产生 tool 事件** ——
-不过滤的话，前端轨迹卡会显示"正在搜索"×N，而模型明明只派了一次 task。
-所以"只报顶层工具"这条断言是本文件的存在理由之一。
 """
 
 from __future__ import annotations
@@ -15,21 +11,20 @@ from datetime import date
 
 from app.api.chat_stream import ChatHandle, NODE_LABELS, build_chat_input
 from app.graph.graph import build_graph
-from fakes import POI_IDS, SOFT_EMPTY, ai_text, ai_tool_call, make_nodes, run, soft_says, sub_finds
-from test_graph import _draft, _intent, _search_all, _sub_finds_all
+from fakes import POI_IDS, SOFT_EMPTY, ai_text, ai_tool_call, make_nodes, run, soft_says
+from test_graph import _draft, _intent, _search_all
 
 TODAY = date(2026, 9, 16)
 
 
 def _happy_nodes(**kwargs):
-    """与 test_graph 的 happy path 同构：一轮 task 铺满池子 → 收工 → 出稿。"""
+    """与 test_graph 的 happy path 同构：一轮直搜铺满池子 → 收工 → 出稿。"""
     kwargs.setdefault("today", TODAY)
     kwargs.setdefault("soft_script", [SOFT_EMPTY])  # 允许调用方覆盖（如 check 测试喂非空 findings）
     return make_nodes(
         extract_script=_intent(),
         tool_script=[_search_all(), ai_text("信息够了，我打算这么排。")],
         plan_script=[ai_text(_draft())],
-        sub_script=_sub_finds_all(),
         **kwargs,
     )
 
@@ -96,16 +91,15 @@ def test_skeleton_not_emitted_on_ask_more_path():
     assert "token" in _types(events)  # 追问文本照发
 
 
-def test_tool_events_report_only_top_level_task():
-    """🔴 子 agent 内部的 search_poi 不得漏进 tool 事件 —— 只报模型发起的 task。"""
+def test_tool_events_report_top_level_tool_calls():
+    """tool 事件必须成对出现且 tool 名正确（P1 后全部是主图直调，天然全报）。"""
     events, _ = run(_collect(_happy_nodes()))
 
     calls = [e for e in events if e.type == "tool_call"]
     results = [e for e in events if e.type == "tool_result"]
-    assert len(calls) == 1, f"只该有一次顶层工具调用，实际 {[ (e.tool, e.label) for e in calls ]}"
-    assert calls[0].tool == "task"
-    assert calls[0].label == "正在收集候选：成都值得去的地点"
-    assert not any(e.tool == "search_poi" for e in calls + results), "子 agent 内部搜索泄漏到了 tool 事件"
+    assert len(calls) == 1, f"只该有一次工具调用，实际 {[ (e.tool, e.label) for e in calls ]}"
+    assert calls[0].tool == "search_poi"
+    assert calls[0].label == "正在搜索：景点"
     # call_id 配对
     assert {c.call_id for c in calls} == {r.call_id for r in results}
     assert results[0].ok is True and results[0].summary
@@ -148,7 +142,6 @@ def test_ask_more_path_streams_token_not_trip():
         extract_script=[ai_text(json.dumps({"destination": "成都"}, ensure_ascii=False))],
         tool_script=[ai_text("够了")],
         plan_script=[ai_text(_draft())],
-        sub_script=[],
         soft_script=[SOFT_EMPTY],
     )
     events, final = run(_collect(nodes, message="下周去成都"))
@@ -172,7 +165,8 @@ def test_build_chat_input_continuation_keeps_checkpoint_facts():
     assert "collected_pois" not in cont
     assert "requirements" not in cont
     assert "missing_required" not in cont
-    assert "subagent_trace" not in cont
+    assert "subagent_trace" not in cont  # P1 后该字段已随子 agent 退役，续轮更不该带
+    assert "searched_keywords" not in cont
     assert cont["user_message"] == "加个博物馆"
     assert cont["tool_call_count"] == 0, "每轮计数从零开始（预算是每轮的）"
 

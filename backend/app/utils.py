@@ -1,10 +1,10 @@
 """跨模块的小工具函数。
 
-为什么单独一个文件：`_text_of` 原来住在 `graph/nodes.py`，
-M4 的 `subagent.py` 也要用它，而 `nodes.py` 同时要 import `subagent`
+为什么单独一个文件：`_text_of` 原来住在 `graph/nodes.py`，M4 时代的
+`subagent.py` 也要用它，而 `nodes.py` 同时要 import `subagent`
 的 trace 通道 —— 两边互相 import 就是循环依赖（Python 会静默给你一个
-半初始化的模块，报错位置离病根十万八千里）。
-判断标准就一条：**被两个互有依赖的模块共用的东西，挪出去**。
+半初始化的模块，报错位置离病根十万八千里）。subagent.py 已退役（P1/D79），
+但"被两个互有依赖的模块共用的东西，挪出去"这条判断标准留着。
 """
 
 from __future__ import annotations

@@ -53,7 +53,6 @@ from fakes import (
     make_nodes,
     run,
     soft_says,
-    sub_finds,
 )
 
 TODAY = date(2026, 9, 16)
@@ -86,27 +85,19 @@ def _intent(script_date: str | None = TODAY.isoformat(), **extra) -> list:
     return [ai_text(json.dumps(payload, ensure_ascii=False))]
 
 
-_ALL_PICKS = [{"poi_id": pid, "reason": "测试"} for pid in POI_IDS]
-
-
 def _search_all():
-    """主 agent 派一次 `task`，子 agent 一轮把 mock 池铺满。
+    """主 agent 直搜一次，把 mock 池铺满。
 
     🔴 为什么要"铺满"而不是随便搜一个词：`_draft()` 默认用 `POI_IDS[:3]`，
     如果池子里缺其中一个，测试就会**意外走进 repair 路径** ——
     那时它测的就不是"正常路径"了，而断言失败的信息完全指不到这里。
     显式铺满 = 让每条测试测它自己声称要测的东西。
 
-    M4 后主 agent 没有直搜工具 —— 搜索整体走 `task`（D5）。
-    关键词「景点」在 mock 的检索标签表里 9 个 POI **全命中**
-    （每个都有这个 tag），一次搜索就够铺满。
+    P1（D79）后主 agent 直搜 `search_poi`。关键词「景点」在 mock 的检索
+    标签表里 9 个 POI **全命中**（每个都有这个 tag），一次搜索就够铺满
+    （池子记的是执行层全量，不受展示层 top-8 截断影响）。
     """
-    return ai_tool_call("task", {"objective": "成都值得去的地点", "city": "成都"})
-
-
-def _sub_finds_all():
-    """配套的子 agent 脚本：搜「景点」→ 终选全池。"""
-    return sub_finds("景点", picks=_ALL_PICKS)
+    return ai_tool_call("search_poi", {"keyword": "景点", "city": "成都"})
 
 
 def _draft(*poi_ids: str, days: int = 1, title: str = "成都三日") -> str:
@@ -241,7 +232,6 @@ def test_past_date_also_stops_at_ask_more():
 
 
 def _happy_nodes(**kwargs):
-    kwargs.setdefault("sub_script", _sub_finds_all())
     return _nodes(
         extract_script=_intent(),
         tool_script=[_search_all(), ai_text("信息够了，我打算这么排。")],
@@ -267,18 +257,13 @@ def test_happy_path_produces_three_day_trip():
     assert trip["summary"]["total_distance_km"] > 0
     assert trip["summary"]["hard_errors"] == 0
 
-    # 过程中的计量：task 计 1 次工具调用（子 agent 内部的搜索不占主预算）
+    # 过程中的计量：直搜计 1 次工具调用
     assert state["tool_call_count"] == 1
     assert state["agent_rounds"] == 2
     assert state["check_rounds"] == 0
 
-    # M4 验收：主 agent 的 trace 里能看到它调了子 agent
-    assert state["subagent_trace"], "task 调用必须留下过程记录"
-    trace = state["subagent_trace"][0]
-    assert trace["objective"] == "成都值得去的地点"
-    assert trace["searches"] == 1
-    assert trace["keywords"] == ["景点"]
-    assert trace["returned"] > 0
+    # D71 台账：搜过什么词有账可查（P1 后内联在 tool_step）
+    assert state["searched_keywords"] == ["成都|景点"]
 
     # 每一站都带判据（前端三态上色要用），且全部通过
     for day in trip["days"]:
@@ -316,7 +301,6 @@ def test_every_tool_call_gets_a_response_in_real_graph():
             ),
             ai_text("够了"),
         ],
-        sub_script=_sub_finds_all(),
         plan_script=[ai_text(_draft())],
     )
     state = run(_run("去成都", nodes=nodes))
@@ -388,7 +372,6 @@ def _repair_nodes(plan_script):
     return _nodes(
         extract_script=_intent(),
         tool_script=[_search_all(), ai_text("信息够了")],
-        sub_script=_sub_finds_all(),
         plan_script=plan_script,
     )
 
@@ -486,7 +469,6 @@ def test_validation_hard_error_drives_the_repair_loop():
         provider=_FarProvider(today=TODAY),
         extract_script=_intent(),
         tool_script=[_search_all(), ai_text("信息够了")],
-        sub_script=_sub_finds_all(),
         # 一直给同一份"id 全真但路线很赶"的草稿 —— 脚本用完会重复最后一条
         plan_script=[ai_text(_draft(*POI_IDS[:3], days=2))],
     )
@@ -509,7 +491,6 @@ def test_validation_hard_error_message_reaches_the_model():
         provider=_FarProvider(today=TODAY),
         extract_script=_intent(),
         tool_script=[_search_all(), ai_text("信息够了")],
-        sub_script=_sub_finds_all(),
         plan_script=[ai_text(_draft(*POI_IDS[:3], days=2))],
     )
     run(_run("去成都", nodes=nodes))
@@ -532,7 +513,6 @@ def test_tool_call_budget_forces_generation():
             _search_all(),
             ai_text("我还想再搜几次"),
         ],
-        sub_script=_sub_finds_all(),
         plan_script=[ai_text(_draft(POI_IDS[0], POI_IDS[1]))],
         max_tool_calls=1,
     )
@@ -549,9 +529,8 @@ def test_agent_round_budget_forces_generation():
         extract_script=_intent(),
         tool_script=[
             _search_all(),
-            ai_tool_call("task", {"objective": "再找几个公园", "city": "成都"}),  # 一直还想再搜
+            ai_tool_call("search_poi", {"keyword": "公园", "city": "成都"}),  # 一直还想再搜
         ],
-        sub_script=_sub_finds_all(),
         plan_script=[ai_text(_draft(POI_IDS[0], POI_IDS[1]))],
         max_agent_rounds=2,
     )
@@ -567,7 +546,6 @@ def test_forced_stop_message_is_visible():
     nodes = _nodes(
         extract_script=_intent(),
         tool_script=[_search_all()],
-        sub_script=_sub_finds_all(),
         plan_script=[ai_text(_draft(POI_IDS[0], POI_IDS[1]))],
         max_agent_rounds=1,
     )
@@ -609,8 +587,7 @@ def test_search_that_finds_nothing_also_blocks_generation():
     """
     nodes = _nodes(
         extract_script=_intent(),
-        tool_script=[ai_tool_call("task", {"objective": "成都的火锅店", "city": "成都"}), ai_text("没搜到")],
-        sub_script=sub_finds("火锅", "成都 餐厅"),  # picks 为空 → "没找到"是明确结论
+        tool_script=[ai_tool_call("search_poi", {"keyword": "火锅", "city": "成都"}), ai_text("没搜到")],
         plan_script=[ai_text(_draft())],
     )
     state = run(_run("去成都吃火锅", nodes=nodes))
@@ -644,7 +621,6 @@ def test_weather_outside_window_does_not_kill_the_graph():
     nodes = _nodes(
         extract_script=_intent(script_date="2026-12-01"),
         tool_script=[_search_all(), ai_text("够了")],
-        sub_script=_sub_finds_all(),
         plan_script=[
             ai_text(
                 json.dumps(
@@ -687,7 +663,6 @@ def test_total_tool_executions_never_exceed_budget():
     nodes = _nodes(
         extract_script=_intent(),
         tool_script=[_search_all()],  # 永远一次想搜 5 个（现在 = 一次 task，内部自己试错）
-        sub_script=_sub_finds_all(),
         plan_script=[ai_text(_draft(POI_IDS[0], POI_IDS[1]))],
         max_tool_calls=3,
     )
@@ -734,7 +709,6 @@ def test_soft_check_runs_on_the_final_trip():
     nodes = _nodes(
         extract_script=_intent(),
         tool_script=[_search_all(), ai_text()],
-        sub_script=_sub_finds_all(),
         plan_script=[ai_text(_draft(POI_IDS[0], POI_IDS[1]))],
         soft_script=[
             soft_says(
@@ -771,7 +745,6 @@ def test_soft_fail_never_creates_blocking_or_repair():
     nodes = _nodes(
         extract_script=_intent(),
         tool_script=[_search_all(), ai_text()],
-        sub_script=_sub_finds_all(),
         plan_script=[ai_text(_draft(POI_IDS[0], POI_IDS[1]))],
         soft_script=[
             soft_says(
@@ -805,7 +778,6 @@ def test_soft_llm_crash_still_produces_a_trip():
     nodes = _nodes(
         extract_script=_intent(),
         tool_script=[_search_all(), ai_text()],
-        sub_script=_sub_finds_all(),
         plan_script=[ai_text(_draft(POI_IDS[0], POI_IDS[1]))],
         soft_script=[],  # 会被下面整个换掉
     )

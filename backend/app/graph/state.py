@@ -102,29 +102,16 @@ class TripState(TypedDict, total=False):
     """日期 → 天气 dump。同样为了恢复。"""
 
     searched_keywords: list[str]
-    """已派出去搜过的**关键词**（D71），累计、去重，无 reducer（覆盖语义）。
+    """已执行过搜索的 `city|keyword` 台账（D71，P1 后内联在 `tool_step`），
+    累计、去重，无 reducer（覆盖语义）。
 
-    为什么要有它：子 agent 每次 `task` 调用都是一份全新状态（D5 已接受），
-    所以「**谁搜过什么词**」在子 agent 之间根本不存在 —— 实测表现为同一个词
-    被两个 task 各搜一遍（高德配额 + 子 agent 的 LLM 往返都被白花）。
-    `collected_pois` 只能告诉新 task "哪些**地点**已经有了"，**回答不了"哪个词已经搜过"**。
+    原始动机（子 agent 时代）：每次 `task` 是一份全新状态，「谁搜过什么词」
+    在 task 之间不存在，同一个词被反复搜（高德配额白花）。
+    P1 主图直搜后模型能在历史里看到自己搜过什么，但**执行闸仍保留**：
+    同一个 `city|keyword` 再来就直接跳过执行，回"已搜过"的 ToolMessage。
 
-    ⚠️ 它**只用来拼进新 task 的描述**（提示级去重，与 D65 同款），
-    **不是硬闸门** —— 硬拦会让"同一个词换个意图再搜"（比如先搜景点、后搜餐厅，
-    都叫「成都」）变成不可能。这是刻意的：**去重的目标是省重复动作，不是禁止搜索。**
-    """
-
-    subagent_trace: Annotated[list[Any], operator.add]
-    """每次 `task`（搜索子 agent）调用的过程记录，`tool_step` 只返回**本次新增**。
-
-    为什么用 `operator.add` 而不是"节点自己合并全量"：合并要自己拼历史，
-    漏拼一次就**静默丢一段 trace**；add 语义下每个 tool_step 只对自己的
-    新增负责 —— 和 `tool_call_count` 一个道理。
-
-    这是 M4 验收「主 agent 的 trace 里能看到它调了子 agent」的落点，
-    也是 M6 过程可视化（前端画"子 agent 在搜什么"）的数据来源。
-    每条记录：`objective / city / rounds / searches / keywords /
-    returned / degraded / llm_failed`。
+    ⚠️ 闸的是**逐字重复**，不是禁止搜索 —— 换个更具体的词照样放行。
+    去重的目标是省重复动作，不是禁搜索。
     """
 
     # ══════════ 产物 ══════════

@@ -37,7 +37,6 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from pydantic import Field, PrivateAttr
 
 from app.graph.nodes import Nodes
-from app.graph.subagent import build_search_subagent, build_task_tool
 from app.providers.mock import MOCK_CITY, MOCK_POI_POOL, MockAmapProvider
 from app.tools.amap_tools import build_amap_tools
 
@@ -208,37 +207,11 @@ def soft_says(*findings: dict) -> AIMessage:
 SOFT_EMPTY = soft_says()
 
 
-#: 子 agent 的**默认**回复：直接终选、picks 为空。
-#:
-#: 为什么要有默认值：大多数测试里主 agent 调 `task` 只是为了"有这个工具"，
-#: 没人关心子 agent 搜出了什么。默认立即终选（且什么都不挑）让 task
-#: 变成一次廉价的过路调用 —— 行为与 `SOFT_EMPTY` 同一个设计理由。
-#:
-#: ⚠️ 注意语义：picks 为空 + 没搜过任何东西 → 子图会走**降级清单**
-#: （把池里能当站点的都端出来）。池子空时返回"没有找到合适的候选"。
-SUB_FINAL_EMPTY = ai_text('{"action": "final", "picks": []}')
-
 #: 骨架节点的**默认**回复（D77）。大多数测试不关心骨架长什么样，
 #: 给一份最小合法骨架让节点安静地过；要测骨架行为时用 `skel_script` 覆盖。
 SKEL_EMPTY = ai_text(
     '{"title": "测试骨架", "days": [{"day": 1, "date": null, "theme": "测试", "stops": ["测试点"]}]}'
 )
-
-
-def sub_finds(*keywords: str, picks: list[dict] | None = None) -> list[AIMessage]:
-    """造一段子 agent 脚本：一轮把关键词搜完，然后终选。
-
-    `picks` 是终选清单 —— **必须引用池子里真实存在的 id**
-    （终选渲染会逐个过池子，编的 id 被静默丢弃，那会让测试
-    "看着绿、实际什么都没测到"，和 `soft_says` 的注释同一个道理）。
-    """
-    script = [
-        ai_text(
-            json.dumps({"action": "search", "keywords": list(keywords)}, ensure_ascii=False)
-        ),
-        ai_text(json.dumps({"action": "final", "picks": list(picks or [])}, ensure_ascii=False)),
-    ]
-    return script
 
 
 def make_nodes(
@@ -247,7 +220,6 @@ def make_nodes(
     plan_script: Sequence[AnyMessage] | None = None,
     extract_script: Sequence[AnyMessage] | None = None,
     soft_script: Sequence[AnyMessage] | None = None,
-    sub_script: Sequence[AnyMessage] | None = None,
     skel_script: Sequence[AnyMessage] | None = None,
     provider: Any = None,
     today: date | None = None,
@@ -256,23 +228,12 @@ def make_nodes(
 ) -> Nodes:
     """造一个全部用假 LLM 的 `Nodes`。
 
-    ⚠️ **工具集与生产同构**（M4）：`[task, get_weather, calc_distance]`，
-    **没有 `search_poi`** —— 主 agent 工具集里有直搜的话，测试就再也
-    抓不到"搜索必须走子 agent"这条纪律的回归了。
-    `sub_script` 是子 agent 规划 LLM 的脚本，通过 `build_task_tool`
-    注进 task 工具内部的子图。
+    ⚠️ **工具集与生产同构**（P1/D79 起主图直搜）：`[search_poi, get_weather,
+    calc_distance]` —— 生产 `build_runtime` 给什么，这里就是什么。
     """
     active = provider or MockAmapProvider(today=today)
     if tools is None:
-        all_tools = build_amap_tools(active, default_city=MOCK_CITY)
-        by_name = {t.name: t for t in all_tools}
-        sub_llm = ScriptedChatModel(script=list(sub_script or [SUB_FINAL_EMPTY]))
-        subgraph = build_search_subagent(llm=sub_llm, search_tool=by_name["search_poi"])
-        tools = [
-            build_task_tool(subgraph=subgraph, default_city=MOCK_CITY),
-            by_name["get_weather"],
-            by_name["calc_distance"],
-        ]
+        tools = build_amap_tools(active, default_city=MOCK_CITY)
     return Nodes(
         provider=active,
         tools=tools,
@@ -302,7 +263,7 @@ def make_state(**overrides: Any) -> dict[str, Any]:
         "tool_call_count": 0,
         "agent_rounds": 0,
         "check_rounds": 0,
-        "subagent_trace": [],
+        "searched_keywords": [],
         "pending_messages": [],
         "requirements": {},
         "missing_required": [],
@@ -323,7 +284,6 @@ POI_IDS: list[str] = [p.poi_id for p in MOCK_POI_POOL]
 __all__ = [
     "POI_IDS",
     "SOFT_EMPTY",
-    "SUB_FINAL_EMPTY",
     "ScriptedChatModel",
     "ai_multi_tool_calls",
     "ai_text",
@@ -333,5 +293,4 @@ __all__ = [
     "pool_of",
     "run",
     "soft_says",
-    "sub_finds",
 ]

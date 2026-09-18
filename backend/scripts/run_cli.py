@@ -128,28 +128,6 @@ def _fmt_stop(stop: dict) -> str:
     return "\n".join(lines)
 
 
-def _fmt_trace(record: dict) -> str:
-    """一条子 agent trace → 一行人话。
-
-    🔴 `degraded` / `llm_failed` 必须显眼 —— "子 agent 降级了"意味着
-    主 agent 拿到的是**未经精选**的候选，排程质量会掉一档。
-    静默降级（不标记）是自欺欺人：出问题时没人分得清
-    "模型笨"还是"输入本来就烂"。
-    """
-    flags = ""
-    if record.get("degraded"):
-        flags += "｜⚠️ 降级"
-    if record.get("llm_failed"):
-        flags += "｜❌ 规划失败"
-    return (
-        f"· 「{record.get('objective', '')}」"
-        f" → {record.get('searches', 0)} 次搜索"
-        f"（关键词：{'、'.join(record.get('keywords') or []) or '无'}）"
-        f" → 返回 {record.get('returned', 0)} 条"
-        f"{flags}"
-    )
-
-
 def print_result(state: dict) -> None:
     print(f"\n{_LINE}\n 结果\n{_LINE}")
 
@@ -176,15 +154,9 @@ def print_result(state: dict) -> None:
         for poi in pool.values():
             print(f"    · {poi['name']}  [{poi['poi_id']}]")
 
-    # ── M4：子 agent 的过程记录 ──
-    # 这是"搜索到底花了多少功夫"唯一可见的地方：主上下文里只有一个 task
-    # 调用和它的最终清单，中间几轮换词试错全被隔离掉了（这正是 D5 的目的）。
-    # 不在这里印出来，"上下文隔离"就只是一个看不见的架构说法。
-    trace = state.get("subagent_trace") or []
-    if trace:
-        print(f"\n【搜索子 agent】{len(trace)} 次任务")
-        for record in trace:
-            print("    " + _fmt_trace(record))
+    ledger = state.get("searched_keywords") or []
+    if ledger:
+        print(f"【已搜关键词】{len(ledger)} 个：{'、'.join(ledger)}")
 
     trip = state.get("trip")
     if trip:

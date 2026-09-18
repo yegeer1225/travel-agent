@@ -86,11 +86,6 @@ from app.schemas import (
     Weather,
 )
 from app.tools.poi_pool import PoiPool, poi_pool_scope
-from app.graph.subagent import (
-    drain_subagent_trace,
-    keyword_ledger_scope,
-    subagent_trace_scope,
-)
 from app.utils import text_of
 
 logger = logging.getLogger(__name__)
@@ -139,27 +134,25 @@ LLM_FAIL_TEXT = (
 
 AGENT_SYSTEM_PROMPT = """你是行程规划助手。**你现在的工作是收集事实，不是写行程。**
 
-搜索地点由**搜索子 agent** 负责：你用 `task` 工具给它派活，它搜完给你一份带 id 的精选清单。
-天气和距离由你直接查（工具：查天气、算驾车距离）。
+地点搜索、天气、距离都由你直接查（工具：搜地点、查天气、算驾车距离）。
 
 工作方式：
 
-1. 按用户偏好拆成 1~3 个搜索任务，每个任务一次 `task` 调用。
-   任务描述必须**自包含**（城市 + 找什么 + 约束），因为子 agent 看不到我们的对话。
-   比如一个任务找景点、一个任务找吃的。不要派 4 个以上。
-   **相互独立的任务要在同一次回复里一起派**（并行执行，省时间）：
-   例如「找景点」和「找餐厅」互不依赖，就一次同时发两个 `task` 调用；
-   只有当下一个任务的描述取决于上一个的结果时才分开派。
-2. 需要判断顺序是否合理时，用算距离工具查相邻两站的车程。
+1. **第一条回复就一次性派出本次需要的全部 search_poi 调用**（同一轮并行执行，省时间）：
+   按用户需求和天数覆盖这些类别 —— 核心景点/地标、公园、博物馆、当地特色美食，
+   过夜行程再加住宿区。关键词要具体（「成都 火锅」好于「餐厅」），
+   总数控制在 5~12 个。**不要只派一个然后等结果** —— 每多等一轮，用户就多等几十秒。
+2. 看到结果后，某一类候选明显不够才**补搜一轮**（同样一次派完）；信息够了就停止。
+3. 需要判断顺序是否合理时，用算距离工具查相邻两站的车程。
    **不需要为了每一对站点都算一遍**，只算你打算真正相邻的那几对。
-3. 如果行程日期在天气可查范围内，查一下天气（一天一次就够）。
-4. **信息够了就直接回复一句话说明你打算怎么安排，不要再调用工具。**
+4. 如果行程日期在天气可查范围内，查一下天气（一天一次就够）。
+5. **信息够了就直接回复一句话说明你打算怎么安排，不要再调用工具。**
 
 硬规则（违反会导致整份行程作废）：
 
-- **所有地点都必须来自 task 返回的清单**，必须用清单里的 id。
+- **所有地点都必须来自 search_poi 返回的清单**，必须用清单里的 id。
   绝对不要凭记忆或常识写任何地点名或 id。
-- 清单不合适就再派一次任务、换个描述。还是找不到就**少安排一个站点**，
+- 某个关键词搜不到就换个更具体的词再搜。还是找不到就**少安排一个站点**，
   **不要编一个出来** —— 少一站是"信息不足"，编一站是"数据造假"。
 - 算距离时只用清单里出现过的 id，不要自己估距离或时间。
 - **不要输出 JSON，不要写完整行程表。** 你只负责收集和判断，
@@ -665,19 +658,23 @@ class Nodes:
         used_calls = state.get("tool_call_count") or 0
         allowed = max(0, self.max_tool_calls - used_calls)
 
-        # trace 作用域与池子作用域同层：task 工具（搜索子 agent）执行期间
-        # 往里写过程记录，节点结束时 drain 回 state —— 这就是 M4 验收里
-        # "主 agent 的 trace 里能看到它调了子 agent"的落点。
-        # D71 的搜索关键词台账。**拷一份进来**、跑完写回 ——
-        # 不原地改 state 里那个 list：state 值可能被多跳共享，
-        # 原地改等于在别人不知道的情况下改历史，排查时对不上账。
+        # D71 的搜索关键词台账（原在 subagent.py，P1 后随主图直搜内联到这）。
+        # **拷一份进来**、跑完写回 —— 不原地改 state 里那个 list：
+        # state 值可能被多跳共享，原地改等于在别人不知道的情况下改历史。
         keywords_ledger = list(state.get("searched_keywords") or [])
+        seen_keys = set(keywords_ledger)
 
-        with (
-            poi_pool_scope(pool) as active,
-            subagent_trace_scope(),
-            keyword_ledger_scope(keywords_ledger),
-        ):
+        def _ledger_key(call: dict[str, Any]) -> str | None:
+            """search_poi 调用的台账键（city|keyword）。非搜索调用返回 None。"""
+            if str(call.get("name") or "") != "search_poi":
+                return None
+            args = call.get("args") or {}
+            kw = str(args.get("keyword") or "").strip()
+            if not kw:
+                return None
+            return f"{str(args.get('city') or '').strip()}|{kw}"
+
+        with poi_pool_scope(pool) as active:
 
             async def _run_one(call: dict[str, Any]) -> ToolMessage:
                 name = str(call.get("name") or "")
@@ -695,6 +692,25 @@ class Nodes:
                         tool_call_id=call_id,
                         name=name or "unknown",
                     )
+
+                # ── 台账去重（D71 精神，主图内联版）──
+                # 同一个 city|keyword **不重复执行**：结果已经在历史里，
+                # 重搜只是白烧高德配额。提示级去重靠 prompt，这里是执行闸。
+                # ⚠️ 仍然是"跳过执行"不是"拒绝回应" —— ToolMessage 必须回。
+                key = _ledger_key(call)
+                if key is not None:
+                    if key in seen_keys:
+                        kw = str(args.get("keyword") or "").strip()
+                        return ToolMessage(
+                            content=(
+                                f"「{kw}」这个关键词已经搜过了，结果就在上面的对话里。"
+                                f"直接用已有候选；确实不够就换一个**更具体**的关键词。"
+                            ),
+                            tool_call_id=call_id,
+                            name=name,
+                        )
+                    seen_keys.add(key)
+                    keywords_ledger.append(key)
 
                 try:
                     # config 显式传下去：让这次工具调用挂进 astream_events 的事件树
@@ -716,7 +732,7 @@ class Nodes:
                 return ToolMessage(content=text, tool_call_id=call_id, name=name)
 
             # ── 并行执行（D76）──
-            # 一轮里的多个工具调用若互不依赖（模型同轮派出的多个 `task` 搜索任务、
+            # 一轮里的多个工具调用若互不依赖（首轮批量派出的多个 search_poi、
             # 批量查天气），串行 await 就是纯等待 —— 2026-09-18 实测 60% 耗时在这。
             # `gather` 并发跑；各自的安全网不变：
             # · 高德限速是"取号式"模块级排队（单 loop 原子），并发自动串成 2.2 QPS 队列
@@ -747,14 +763,12 @@ class Nodes:
             results.extend(over_budget_msgs)
 
             snapshot = _pool_dump(active)
-            sub_trace = drain_subagent_trace()
 
         update: dict[str, Any] = {
             "messages": results,
             "tool_call_count": len(calls),
             "collected_pois": snapshot,
-            "subagent_trace": sub_trace,  # add reducer → 只追加本次新增，历史由 state 保着
-            "searched_keywords": keywords_ledger,  # D71：覆盖语义（列表本身已累计）
+            "searched_keywords": keywords_ledger,  # D71：覆盖语义（本次累计后的全量）
         }
         # ⚠️ 工具执行失败**不写** `state["error"]`（2026-09-18 修）：
         # 工具错误是**模型可自愈的瞬时错误** —— 失败文本已经通过 ToolMessage 回喂模型

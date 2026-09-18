@@ -528,8 +528,8 @@ node    make_skeleton start        ← 先快速排骨架（D77）
 node    make_skeleton end
 skeleton {title, days[]}              ← 首结果（~20-30s），界面立刻有东西可看
 node    agent_step    start           ← 后台精排继续（此时用户已在看骨架）
-tool_call  task                        ← M4 起搜索走子 agent（主 agent 无 search_poi）
-tool_result task
+tool_call  search_poi                  ← P1（D79）主图直搜，首轮一次性批量派出
+tool_result search_poi
 tool_call  get_weather
 tool_result get_weather
 node    agent_step    end

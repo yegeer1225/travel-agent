@@ -110,13 +110,11 @@ def build_runtime(
     节点本身只依赖 `Nodes` 这个形状，所以测试里可以整个换掉
     （塞 mock provider、塞假 LLM），不需要动图结构。
     """
-    from app.graph.subagent import build_search_subagent, build_task_tool
     from app.llm import (
         build_extract_llm,
         build_plan_llm,
         build_skel_llm,
         build_soft_llm,
-        build_sub_llm,
         build_tool_llm,
     )
     from app.providers.mock import MOCK_CITY, MockAmapProvider
@@ -141,19 +139,16 @@ def build_runtime(
     default_city = MOCK_CITY
 
     tools = build_amap_tools(active_provider, default_city=default_city)
-    by_name = {t.name: t for t in tools}
 
-    # ══════════ M4（D5）：搜索整体移交给子 agent ══════════
-    # 主 agent 的工具集里**没有 search_poi** —— 留着它，模型永远直搜
-    # （一步到位 token 更少），task 成摆设，上下文隔离名存实亡。
-    # 子 agent 内部复用同一个 search_poi 实例：在 tool_step 的池子作用域内
-    # 执行，搜到的 POI 自动进主候选池，封闭世界不破（见 subagent.py docstring）。
-    subgraph = build_search_subagent(llm=build_sub_llm(model), search_tool=by_name["search_poi"])
-    main_tools = [
-        build_task_tool(subgraph=subgraph, default_city=default_city),
-        by_name["get_weather"],
-        by_name["calc_distance"],
-    ]
+    # ══════════ P1（D79）：主图直搜，子 agent 退役 ══════════
+    # 原 M4/D5 结构：主 agent 没有 search_poi，搜索整体走 task 工具内的子图
+    # （多轮"出关键词→搜→看结果"LLM 循环）。2026-09-18 实测账：一次规划的
+    # 耗时 85% 在 LLM 调用，其中子 agent 的决策轮占 12~20 次调用 ——
+    # 而高德搜索本身只花 ~15s。上下文隔离的收益（搜索原文不进主上下文）
+    # 经实测只有 ~300 token/次（search_poi 展示层本来就截断 top-8），
+    # 换不来十几轮 LLM 往返。→ 关键词选择改由主 agent 首轮一次性批量派出
+    # （prompt 纪律 + D76 并行 gather + 台账去重闸兜底）。
+    main_tools = list(tools)
 
     return Nodes(
         provider=active_provider,
@@ -312,7 +307,6 @@ def initial_state(
         "tool_call_count": 0,
         "agent_rounds": 0,
         "check_rounds": 0,
-        "subagent_trace": [],
         "pending_messages": list(pending_messages or []),
         "requirements": {},
         "missing_required": [],

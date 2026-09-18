@@ -16,7 +16,7 @@
 | LangGraph 事件 | SSE 事件 | 过滤条件 |
 |---|---|---|
 | `on_chain_start/end`（name 在节点表里） | `node` start/end | 排除子 agent 内部节点（不在表里自然排除） |
-| `on_tool_start/end/error` | `tool_call` / `tool_result` | **只报顶层**：`metadata.langgraph_node == "tool_step"`。子 agent 内部的 search_poi 不报（那是 task 的实现细节，过程记录在 `subagent_trace`） |
+| `on_tool_start/end/error` | `tool_call` / `tool_result` | **只报顶层**：`metadata.langgraph_node == "tool_step"`（P1 后所有工具都是主图直调，天然全报） |
 | `soft_check` 节点结束 | `check` | 校验卡在这里发（而非 check_plan）—— 因为 soft_warnings 到这一刻才齐 |
 | `ask_more` 节点结束 | `token`（追问文本） | ask 是模板文本，整段一发 |
 | 流结束且有 trip | `token`（总结）+ `trip` + `done` | 总结是模板不是 LLM —— 不为一句客套话多花一次调用 |
@@ -70,17 +70,17 @@ NODE_LABELS: dict[str, str] = {
 }
 
 # ── 工具 → 动作词（tool_call 的 label 用）──
-_TOOL_VERB = {"task": "正在收集候选", "search_poi": "正在搜索", "get_weather": "正在查天气", "calc_distance": "正在算车程"}
+_TOOL_VERB = {"search_poi": "正在搜索", "get_weather": "正在查天气", "calc_distance": "正在算车程"}
 
 # 心跳间隔（契约：15s）。取 14s 留出余量，防止代理在整 15s 处掐线。
 HEARTBEAT_SECONDS = 14.0
 
 
 def _is_top_level_tool(ev: dict[str, Any], tool_step_run_id: str | None) -> bool:
-    """这条 tool 事件是不是"模型在 tool_step 里发起的那次调用"（而非子 agent 内部搜索）。
+    """这条 tool 事件是不是"模型在 tool_step 里发起的那次调用"（而非别处执行的工具）。
 
-    判据 = 直接父是 tool_step 的节点 run。子 agent 内部的 search_poi
-    挂在 task 工具 run 之下，父不同 —— 无论 metadata 怎么传导都不会误报。
+    判据 = 直接父是 tool_step 的节点 run。P1 后所有工具都是主图直调，
+    这个过滤保留是为了防止未来再出现嵌套执行时 SSE 层静默多报。
     """
     if tool_step_run_id is None:
         return False
@@ -92,8 +92,8 @@ def _tool_label(tool: str, args: dict[str, Any]) -> str:
     """tool_call 的 label：把最有信息量的参数拼进去（"正在搜索：武侯祠"）。"""
     verb = _TOOL_VERB.get(tool, "正在调用")
     detail = ""
-    if tool in {"task", "search_poi"}:
-        detail = str(args.get("keyword") or args.get("objective") or "")
+    if tool == "search_poi":
+        detail = str(args.get("keyword") or "")
     elif tool == "get_weather":
         detail = str(args.get("date_str") or "")
     elif tool == "calc_distance":
@@ -169,8 +169,7 @@ async def graph_chat_stream(
             node_t0: dict[str, float] = {}  # 计时起点存这里 —— start/end 是两个事件 dict，存事件里传不过去
             # tool_step 节点 run 的 id：**顶层工具的判据是 parent_ids 的直接父**。
             # 🔴 不能用 metadata.langgraph_node 过滤 —— 工具是在节点里 `ainvoke` 的，
-            # 环境回调会把节点的 config 传给**子 agent 内部的 search_poi**
-            # （它继承 task 工具 run 的上下文），metadata 会一路传下去。
+            # 环境回调会把节点的 config 传给工具调用，metadata 会一路传下去；
             # parent_ids[-1] == tool_step 的 run_id 才是真正"模型发起的那次调用"。
             tool_step_run_id: str | None = None
 

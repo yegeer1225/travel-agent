@@ -53,7 +53,6 @@ from fakes import (
     make_state,
     pool_of,
     run,
-    sub_finds,
 )
 from fakes import make_nodes as _make_nodes
 
@@ -472,33 +471,24 @@ def test_make_skeleton_retries_once_then_gives_up():
 def test_tool_step_records_pois_into_state_snapshot():
     """工具返回的 POI 必须进快照 —— 否则校验层拿不到判据来源。
 
-    🔴 M4 关键接线：主 agent 只能通过 `task` 搜索，子 agent 内部用的
-    是**同一个** `search_poi` 实例，在 tool_step 的池子作用域内执行 ——
-    所以"子 agent 搜到的"必须和"直搜的"一样进快照。这是"封闭世界不破"的实证。
+    P1（D79）后主 agent 直搜 `search_poi`：池子快照是"封闭世界不破"的实证，
+    模型后面引用的每个 id 都要能在这里溯源。
     """
-    nodes = make_nodes(
-        sub_script=sub_finds("武侯祠", picks=[{"poi_id": POI_IDS[0], "reason": "测试"}])
-    )
-    ai = ai_tool_call("task", {"objective": "成都的历史古迹", "city": "成都"})
+    nodes = make_nodes()
+    ai = ai_tool_call("search_poi", {"keyword": "武侯祠", "city": "成都"})
     out = run(nodes.tool_step(make_state(messages=[ai])))
 
-    assert out["collected_pois"], "子 agent 搜到东西了，快照不能是空的"
+    assert out["collected_pois"], "直搜搜到东西了，快照不能是空的"
     assert all("poi_id" in v for v in out["collected_pois"].values())
-    assert POI_IDS[0] in out["collected_pois"], "终选清单里的 POI 必须真的在池子里"
+    assert POI_IDS[0] in out["collected_pois"], "搜到的 POI 必须真的在池子里"
 
 
 def test_tool_step_snapshot_accumulates_across_rounds():
     """第二轮搜到的要和第一轮的**合并**（池子是只增不改的），不能覆盖。"""
-    nodes = make_nodes(
-        sub_script=[
-            # 两次 task 各消费一段脚本（同一个 ScriptedChatModel 实例，游标连续）
-            *sub_finds("武侯祠", picks=[{"poi_id": POI_IDS[0], "reason": "测试"}]),
-            *sub_finds("人民公园", picks=[{"poi_id": POI_IDS[2], "reason": "测试"}]),
-        ]
-    )
+    nodes = make_nodes()
     first = run(
         nodes.tool_step(
-            make_state(messages=[ai_tool_call("task", {"objective": "古迹", "city": "成都"})])
+            make_state(messages=[ai_tool_call("search_poi", {"keyword": "武侯祠", "city": "成都"})])
         )
     )
     snapshot_1 = first["collected_pois"]
@@ -506,13 +496,13 @@ def test_tool_step_snapshot_accumulates_across_rounds():
     second = run(
         nodes.tool_step(
             make_state(
-                messages=[ai_tool_call("task", {"objective": "公园", "city": "成都"})],
+                messages=[ai_tool_call("search_poi", {"keyword": "人民公园", "city": "成都"})],
                 collected_pois=snapshot_1,
             )
         )
     )
     assert set(snapshot_1) <= set(second["collected_pois"]), "旧的 POI 不能丢"
-    assert POI_IDS[2] in second["collected_pois"], "第二次 task 搜到的要合并进来"
+    assert POI_IDS[2] in second["collected_pois"], "第二次搜到的要合并进来"
 
 
 def test_tool_step_is_noop_without_tool_calls():
@@ -534,10 +524,10 @@ def test_tool_step_refuses_calls_beyond_budget_but_still_answers():
     """
     nodes = make_nodes(max_tool_calls=2)
     ai = ai_multi_tool_calls(
-        ("task", {"objective": "古迹", "city": "成都"}),
-        ("task", {"objective": "美食", "city": "成都"}),
-        ("task", {"objective": "公园", "city": "成都"}),
-        ("task", {"objective": "购物", "city": "成都"}),
+        ("search_poi", {"keyword": "武侯祠", "city": "成都"}),
+        ("search_poi", {"keyword": "火锅", "city": "成都"}),
+        ("search_poi", {"keyword": "公园", "city": "成都"}),
+        ("search_poi", {"keyword": "博物馆", "city": "成都"}),
     )
     out = run(nodes.tool_step(make_state(messages=[ai])))
 
@@ -554,8 +544,8 @@ def test_tool_step_budget_accounts_for_already_used_calls():
     """余额要按**已用次数**扣，不是每轮都重置成满额。"""
     nodes = make_nodes(max_tool_calls=3)
     ai = ai_multi_tool_calls(
-        ("task", {"objective": "古迹", "city": "成都"}),
-        ("task", {"objective": "美食", "city": "成都"}),
+        ("search_poi", {"keyword": "武侯祠", "city": "成都"}),
+        ("search_poi", {"keyword": "火锅", "city": "成都"}),
     )
     out = run(nodes.tool_step(make_state(messages=[ai], tool_call_count=2)))
 
@@ -640,7 +630,7 @@ def test_agent_step_blocks_when_the_data_source_cannot_cover():
     判据由 provider 自述（`covers`）→ real 档下这道守卫**自动失效**，
     所以这里也顺带保证了它不会拦住真数据。
     """
-    nodes = make_nodes(tool_script=[ai_tool_call("task", {"objective": "找杭州的景点"})])
+    nodes = make_nodes(tool_script=[ai_tool_call("search_poi", {"keyword": "西湖", "city": "杭州"})])
     out = run(nodes.agent_step(_req_state(requirements=_hangzhou_requirements())))
 
     assert "覆盖不到" in out["error"]
@@ -1042,9 +1032,36 @@ def test_render_noop_without_trip():
 
 
 def test_nodes_indexes_tools_by_name():
-    """M4 后主 agent 的工具集里**没有 search_poi**（搜索整体移交给子 agent，D5）。"""
+    """P1（D79）后主 agent **直搜**：工具集 = 三件套（与生产 `build_runtime` 同构）。"""
     nodes = make_nodes()
-    assert set(nodes._tools_by_name) == {"task", "get_weather", "calc_distance"}
+    assert set(nodes._tools_by_name) == {"search_poi", "get_weather", "calc_distance"}
+
+
+def test_tool_step_skips_exact_duplicate_keyword():
+    """台账去重闸（D71 主图内联版）：同一个 `city|keyword` **不重复执行**——
+    结果已经在历史里，重搜只是白烧高德配额。但 ToolMessage 必须回（漏回应=400）。"""
+    nodes = make_nodes()
+    ai = ai_multi_tool_calls(
+        ("search_poi", {"keyword": "武侯祠", "city": "成都"}),
+        ("search_poi", {"keyword": "武侯祠", "city": "成都"}),
+    )
+    out = run(nodes.tool_step(make_state(messages=[ai])))
+
+    assert len(out["messages"]) == 2, "两条都要回应"
+    dup = [m for m in out["messages"] if "已经搜过" in str(m.content)]
+    assert len(dup) == 1, "第二条该被台账拦下"
+    assert out["searched_keywords"] == ["成都|武侯祠"], "台账只记一次"
+
+
+def test_tool_step_ledger_persists_across_rounds():
+    """台账从 state 读入、执行后写回 —— 下一轮同词照样被拦。"""
+    nodes = make_nodes()
+    ai = ai_tool_call("search_poi", {"keyword": "武侯祠", "city": "成都"})
+    out = run(nodes.tool_step(make_state(messages=[ai], searched_keywords=["成都|武侯祠"])))
+
+    assert "已经搜过" in str(out["messages"][0].content)
+    assert out["collected_pois"] == {}, "被拦的搜索没有真的执行，池子不该有新东西"
+    assert out["searched_keywords"] == ["成都|武侯祠"]
 
 
 def test_nodes_works_without_tools():
