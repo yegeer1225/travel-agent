@@ -821,5 +821,4 @@ FastAPI 默认的 `{"detail": ...}` 必须被 exception handler 改写成 `Error
 | 文件上传的大小/类型限制 | ✅ **已定**（1.5）：**10MB**，`jpeg`/`png`/`webp`（**不收 SVG/GIF**），后端强制重编码为 512×512 WebP。**M9 实现** |
 | 移动端 | ✅ **不做**（`DECISIONS.md` D30）：最佳 1440px / 最小 1024px，**只做桌面网页端**。窄屏加一层"请在电脑上打开"提示 |
 
-**这份契约里唯一还没定的东西**：`AMAP_JS_KEY` 的真伪 —— **服务端验不了**（实测，
-`DECISIONS.md` D24），只能到 M2 在浏览器里看报不报 `INVALID_USERKEY`。
+**这份契约里的东西已全部定案**：`AMAP_JS_KEY` 的真伪已于 2026-09-18 验掉 —— 「服务端验不了」这句话本身没错（D24 那 4 种试法都是"服务端调高德 API"），但**加载层可以验**：`curl "https://webapi.amap.com/maps?v=2.0&key=..."` 无效 key 只回 90 字节的 `<AMap JSAPI> Error key!`、有效 key 回 ~968KB 完整库；最终确认走 headless Chrome（`map.on('complete')` 触发 + 瓦片渲染出来 = 有效）。可复用判据见 `DECISIONS.md` 悬而未决区。
