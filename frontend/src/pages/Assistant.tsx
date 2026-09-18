@@ -8,7 +8,7 @@ import type {
   MessageMeta,
 } from '../types/contract'
 import { ApiError, createSession, deleteSession, getSession, listSessions } from '../lib/api'
-import { streamSSE } from '../lib/sse'
+import { streamSSE, SseInterruptedError } from '../lib/sse'
 import ToolTrajectory, { upsertTrajectory, type TrajectoryEntry } from '../components/ToolTrajectory'
 import CheckCard from '../components/CheckCard'
 import TripCard from '../components/TripCard'
@@ -198,17 +198,54 @@ export default function Assistant() {
 
       const ac = new AbortController()
       acRef.current = ac
+
+      // ── 15.13 SSE 断线重连：断流（EOF 无 done）退避重连 1s→2s→4s，最多 3 次 ──
+      // 重连复用同一 POST /chat，带 Last-Event-ID 触发后端恢复（从 checkpoint 续推，不重复落用户消息）
+      const RETRY_DELAYS = [1000, 2000, 4000]
+      const MAX_RETRY = 3
+      let lastEventId: string | null = null
+      let attempts = 0
+      const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
       try {
-        await streamSSE(`/api/sessions/${sid}/chat`, { message: text, steer: false }, handleEvent, ac.signal)
-      } catch (e) {
-        if (e instanceof DOMException && e.name === 'AbortError') return
-        if (e instanceof ApiError && e.code === 'rate_limited') {
-          const sec = e.retryAfter ?? 60
-          setCountdown(sec)
-          setErrorBar(`操作太频繁，请 ${sec} 秒后重试`)
-        } else {
-          // 断流（EOF 未收到 done）也走到这里 → 提示重试
-          setErrorBar(e instanceof Error ? e.message : String(e))
+        while (true) {
+          try {
+            const result = await streamSSE(
+              `/api/sessions/${sid}/chat`,
+              { message: text, steer: false }, // 🔴 重连也必须带非空 message（min_length=1，否则 422）；后端 resume 时不落库
+              handleEvent,
+              ac.signal,
+              { lastEventId },
+            )
+            lastEventId = result.lastEventId
+            break // 收到 done，本轮成功
+          } catch (e) {
+            if (e instanceof DOMException && e.name === 'AbortError') return
+            if (e instanceof ApiError && e.code === 'rate_limited') {
+              // 🔴 重连撞 429：服务端要等自己发现连接断了才释放并发位（约 5s）→ 按 retry_after 等，不立刻重打
+              const sec = e.retryAfter ?? 60
+              if (attempts < MAX_RETRY) {
+                attempts += 1
+                await sleep(sec * 1000)
+                continue
+              }
+              setCountdown(sec)
+              setErrorBar(`操作太频繁，请 ${sec} 秒后重试`)
+              return
+            }
+            if (e instanceof SseInterruptedError) {
+              lastEventId = e.lastEventId ?? lastEventId
+              if (attempts < MAX_RETRY) {
+                await sleep(RETRY_DELAYS[attempts])
+                attempts += 1
+                continue
+              }
+              setErrorBar('连接中断，请重新发送')
+              return
+            }
+            setErrorBar(e instanceof Error ? e.message : String(e))
+            return
+          }
         }
       } finally {
         if (acRef.current === ac) acRef.current = null

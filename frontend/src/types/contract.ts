@@ -364,7 +364,7 @@ export interface AmapImportResponse {
 export interface SpotSearchResponse {
   items: SpotCard[]
   total: number
-  source: "amap" | "mock"
+  source: "amap" | "mock" | "local"
   cached: boolean
 }
 
@@ -386,6 +386,7 @@ export interface GuideListItem {
   comment_count: number
   published_at: string | null
   created_at: string
+  source_trip_id: string | null
 }
 
 export interface GuideDetail {
@@ -401,6 +402,7 @@ export interface GuideDetail {
   comment_count: number
   published_at: string | null
   created_at: string
+  source_trip_id: string | null
   content_md: string
   poi_ids: string[]
   liked: boolean
@@ -489,6 +491,8 @@ export interface HealthResponse {
   model_tool: string
   model_plan: string
   amap_configured: boolean
+  amap_provider_requested: string
+  amap_degraded: boolean
 }
 
 

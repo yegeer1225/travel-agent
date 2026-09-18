@@ -138,7 +138,7 @@ export default function Spots() {
       <div className="deco deco-ring" style={{ width: 26, height: 26, bottom: 26, left: 72 }} />
 
       <h1 className="font-display font-bold text-[34px]">旅游景点</h1>
-      <p className="text-[14px] text-muted mt-1">高德景点搜索 · 经后端代理与缓存</p>
+      <p className="text-[14px] text-muted mt-1">本站收录景点库 · 搜到即可收藏</p>
 
       {/* 搜索表单 */}
       <form onSubmit={doSearch} className="mt-6 flex items-center gap-3">
@@ -167,7 +167,7 @@ export default function Spots() {
         <div className="mt-16 text-center">
           <div className="font-display font-bold text-lg mb-2">输入关键词开始搜索</div>
           <p className="text-muted text-[14px]">
-            例如「成都 博物馆」「广州 长隆」「西湖」… 高德没有本地 POI 库，搜索前这里不会有任何数据
+            例如「成都 博物馆」「广州 长隆」「西湖」… 搜索本站已收录的景点
           </p>
         </div>
       )}
@@ -175,7 +175,7 @@ export default function Spots() {
       {loading && <div className="mt-8 text-muted">搜索中…</div>}
 
       {!loading && items !== null && items.length === 0 && (
-        <div className="mt-16 text-center text-muted">没有找到相关景点，换个关键词试试</div>
+        <div className="mt-16 text-center text-muted">本站暂未收录相关景点，换个关键词试试</div>
       )}
 
       {!loading && items !== null && items.length > 0 && (
@@ -184,7 +184,7 @@ export default function Spots() {
             <span>共 {total} 条结果</span>
             {meta && (
               <span>
-                数据源 {meta.source === 'amap' ? '高德' : 'mock'} · {meta.cached ? '缓存命中' : '实时查询'}
+                数据源 {meta.source === 'local' ? '本站收录' : meta.source === 'amap' ? '高德' : '模拟数据'}
               </span>
             )}
           </div>

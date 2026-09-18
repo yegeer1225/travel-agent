@@ -18,6 +18,16 @@ import { handleUnauthorized } from './auth'
 
 export type SSEHandler = (evt: SSEEvent) => void
 
+/** 断流信号：EOF 但整轮没收到 done（api.md 明文：这两者必须能区分）。带最后收到的帧 id，供恢复重连（15.13） */
+export class SseInterruptedError extends Error {
+  lastEventId: string | null
+  constructor(lastEventId: string | null) {
+    super('连接中断，未收到 done')
+    this.name = 'SseInterruptedError'
+    this.lastEventId = lastEventId
+  }
+}
+
 export interface StreamResult {
   /** 最后收到的 SSE 帧 id（可能为 null：全程没有 id 行） */
   lastEventId: string | null
@@ -86,6 +96,6 @@ export async function streamSSE(
       onEvent(typed)
     }
   }
-  if (!gotDone) throw new Error('连接中断，未收到 done')
+  if (!gotDone) throw new SseInterruptedError(lastEventId)
   return { lastEventId }
 }
