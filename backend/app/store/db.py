@@ -163,7 +163,9 @@ _DDL_TABLES: tuple[str, ...] = (
         photos          JSON         NULL,
         typecode        VARCHAR(16)  NULL,
         type            VARCHAR(128) NULL,
-        open_time       VARCHAR(64)  NULL,
+        -- 2026-09-20 实测：64 放不下真实高德 opentime（大明宫等 POI 的
+        -- 「周一至周日 …；停止入场…」串超 64 字符，INSERT 报 1406）→ 加宽到 255
+        open_time       VARCHAR(255) NULL,
         adcode          VARCHAR(16)  NULL,
         source          VARCHAR(16)  NOT NULL DEFAULT 'seed',
         collected_at    DATETIME(6)  NOT NULL,
