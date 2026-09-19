@@ -1,7 +1,8 @@
-"""M9 后半其余接口测试：spots/search、/home、/uploads/avatar、amap-import。
+"""M9 后半其余接口测试：spots（列表/搜索/详情）、/home、/uploads/avatar、amap-import。
 
-🔴 **2026-09-17 起 `/spots/search` 走收录库（D70）**，provider 只在两处还会被碰到：
-`/home` 的 Hero/推荐，以及**详情回落**（`GET /spots/{poi_id}` 收录库查不到时）。
+🔴 **2026-09-17 起 `/spots/search` 走收录库（D70）**，provider 只在一处还会被碰到：
+**详情回落**（`GET /spots/{poi_id}` 收录库查不到时）。
+🔴 **2026-09-19 起 `/home` 也切收录库（后端交接 R1）**——provider 彻底退出读路径，
 本文件故意让**收录库（B1/B2）与 provider（B1~B6）是两个不同的集合** ——
 否则"搜不到不回落"这条语义根本测不出来（用同一个集合，回落与不回落结果一样）。
 
@@ -109,11 +110,7 @@ def api(monkeypatch):
     client.headers.update(auth_header(user_id=1))
     client.fake_provider = provider
 
-    from app.api.routes import home as home_mod
-
-    monkeypatch.setattr(home_mod, "_home_cache", None)
     yield client
-    monkeypatch.setattr(home_mod, "_home_cache", None)
 
 
 # ── /spots/search ──────────────────────────────────────────
@@ -228,29 +225,47 @@ def test_get_spot_unknown_404(api):
     assert r.json()["error"]["code"] == "not_found"
 
 
-# ── /home ──────────────────────────────────────────────────
+# ── /home（R1：数据源 = 收录库，零出站）────────────────────
 
 
-def test_home_hero_and_recommended(api):
+def test_home_served_from_library(api):
+    """🔴 R1：hero/recommended 全部来自收录库，与 /spots 同源同排序；provider 零出站。
+
+    fixture 收录库只有 B1（带图）/B2（带图）→ hero 2 张，recommended 排除 hero 后为空。
+    """
     r = api.get("/api/home")
     assert r.status_code == 200, r.text
     data = r.json()
-    # 4 个 hero 关键词都有照片 → hero 4 张
-    assert len(data["hero"]) == 4
-    assert all(h["photo"] for h in data["hero"])
-    # recommended 与 hero 不重复
     hero_ids = {h["poi_id"] for h in data["hero"]}
-    assert {s["poi_id"] for s in data["recommended"]}.isdisjoint(hero_ids)
+    assert hero_ids == {"B1", "B2"}
+    assert all(h["photo"] for h in data["hero"])  # hero 必须带真图
+    rec_ids = {s["poi_id"] for s in data["recommended"]}
+    assert rec_ids.isdisjoint(hero_ids)  # 契约：两区不重复
+    assert api.fake_provider.search_log == [], "/home 不该碰 provider（零出站，R1）"
 
 
-def test_home_pois_without_photo_skipped_not_fabricated(api):
-    # 4 个 hero 关键词里只有 1 个有照片 → hero 只给 1 张（绝不硬凑/占位图）
-    api.app.state.nodes.provider.pois = [
-        _poi("B1", "宽窄巷子景区", ["宽窄巷子"], ["https://img/1.jpg"]),
-        _poi("B2", "成都武侯祠博物馆", ["武侯祠"]),  # 无照片
-        _poi("B3", "成都大熊猫繁育研究基地", ["大熊猫基地"]),
-        _poi("B4", "人民公园", ["人民公园"]),
-    ]
+def test_home_hero_and_recommended_split(api):
+    """库变富：5 条（4 带图 + 1 无图）→ hero 3 张全带图，recommended 拿剩下的（含无图卡）。"""
+    from app.store.memory import InMemorySpotStore
+
+    api.app.state.spot_repo = InMemorySpotStore(api.fake_provider.pois[:5])
+    data = api.get("/api/home").json()
+    hero_ids = {h["poi_id"] for h in data["hero"]}
+    rec_ids = {s["poi_id"] for s in data["recommended"]}
+    assert len(data["hero"]) == 3
+    assert all(h["photo"] for h in data["hero"])
+    assert len(data["recommended"]) == 2  # 5 - 3
+    assert rec_ids.isdisjoint(hero_ids)
+
+
+def test_home_hero_without_photo_skipped_not_fabricated(api):
+    """hero 只收带照片的：库里唯一无图的 B2 不进 hero（A39：没图就不给，不硬凑）。"""
+    from app.store.memory import InMemorySpotStore
+
+    no_photo_b2 = _poi("B2", "成都武侯祠博物馆", ["武侯祠"])  # 无照片
+    api.app.state.spot_repo = InMemorySpotStore(
+        [_poi("B1", "宽窄巷子景区", ["宽窄巷子"], ["https://img/1.jpg"]), no_photo_b2]
+    )
     data = api.get("/api/home").json()
     assert len(data["hero"]) == 1
     assert data["hero"][0]["poi_id"] == "B1"

@@ -12,6 +12,7 @@
 
 | 日期 | 改了什么 | 影响 | 决策 |
 |---|---|---|---|
+| 2026-09-19 | `GET /home` 数据源从「高德实时搜索」切到**收录库**（hero=带照片前 3，recommended=评分前 4 排除 hero）；**接口形状零改动** | 前端零改动（数据仍同形状）；首页断网/高德配额耗尽照常工作；`hero` 可能少于 3 张（库里带图的就那么多，不硬凑） | 后端交接 R1（豆包提出） |
 | 2026-09-18 | 新增 `GET /spots`（收录库全量分页）与 `SpotListResponse`；**作废 3.5.1 里"默认态不许平铺"条款** —— 之前禁平铺是因为"前端拿不到真实收录总数"，现在列表接口给了真 `total`，平铺的是真实收录数据 | 前端：景点页默认态从"引导文案"改为封面卡网格（同首页猜你喜欢视觉，整卡可点进详情）；`types.ts`/`contract.ts` 已重生成 | 用户拍板（对话 2026-09-18 晚） |
 | 2026-09-17 | `GET /spots/search` 数据源改为**收录库**；`SpotSearchResponse.source` 枚举新增 **`local`**（现在恒为它）；`cached` 恒 `false`；新增 3.5.1 说明 `GET /spots/{poi_id}` 的回落顺序 | 前端：`source` 判等要加上 `local`；**空结果现在代表"本库没收录"，不再代表"高德搜不到"** → 空态文案要改 | A47 / D70 |
 | 2026-09-16 | `guides` 加 `source_trip_id` / `idempotency_key`；`POST /trips/{id}/publish-as-guide` | 详见第十四节 | A46 / D61~D63 |
@@ -474,6 +475,9 @@ Authorization: Bearer <token>
 
 ### 3.6 `GET /home`
 
+**🔴 2026-09-19 起数据源 = 收录库（R1）**：`hero` / `recommended` 全部来自 `spots` 表，
+**零出站**——高德不可用时首页照常工作（原来逐关键词调 `provider.search_poi`，已废弃）。
+
 ```json
 {
   "hero": [ { "poi_id": "B0FFH...", "name": "宽窄巷子", "city": "成都", "photo": "https://aos-comment.amap.com/..." } ],
@@ -482,10 +486,11 @@ Authorization: Bearer <token>
 }
 ```
 
-- `hero` 给 **3~5 张**（少于 3 张前端**不做轮播**，直接单图）
-- 素材来源 = 高德 POI 的 `photos` 字段（**真数据、可追溯**）。取不到时用无版权图库，**页脚标注来源**
+- `hero`：收录库**带照片**的排序在前最多 **3 张**（少于 3 张前端**不做轮播**，直接单图）——没图不硬凑
+- `recommended`：收录库**评分降序前 4**，排除 hero —— 与 `GET /spots` 列表**同源同排序口径**
+- `hero` 与 `recommended` 的景点**不重复**（沿用原契约）
+- 素材来源 = 收录库快照里的高德 `photos` 字段（**真数据、可追溯**，收录动作见 `seed_spots.py`）
 - ❌ **禁止** AI 生图充当景点照片（会画出不存在的景点）、❌ 禁止灰底占位图
-- `hero` 展示的景点要与 `recommended` 的 4 个**不重复**
 
 ### 3.7 SSE 契约（前端实现细节都在这里）
 

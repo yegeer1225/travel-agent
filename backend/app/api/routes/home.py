@@ -1,89 +1,50 @@
-"""首页聚合接口：`GET /home`（M6 契约、M9 后半实现）。
+"""首页聚合接口：`GET /home`（M6 契约、M9 后半实现；2026-09-19 数据源切收录库 R1）。
 
 契约（api.md 3.6）：
 - 一次请求拿完 Hero + 猜你喜欢，前端少一个 loading 态
-- `hero` 给 3~5 张；素材 = 高德 POI 的 `photos[0]`（真数据、可追溯）
+- `hero` 给最多 3 张；素材 = 收录库（高德真实快照）的 `photos[0]`（真数据、可追溯）
+- `recommended` = 收录库评分降序前 4（排除 hero，与 `/spots` 列表同源同排序口径）
 - hero 与 recommended 的景点**不重复**
 - 拿不到照片就少给一张，**绝不 AI 生图 / 灰底占位**（A39）
+
+数据源（R1，豆包 2026-09-19 转交）：**纯本地读库，零出站** —— 首页原来逐个关键词调
+`provider.search_poi`（依赖高德网络/配额，且与收录列表不同源）；现在只读 `spots` 表，
+高德不可用时首页照常工作。接口形状不变：`HomeResponse{hero, recommended}` 零改动。
+
+⚠️ 不设缓存层：本地查询毫秒级（D70 同款理由——原来的进程内缓存只为省高德配额）。
 
 公开访问（不要求登录）—— 首页在登录前就要能看。
 """
 
 from __future__ import annotations
 
-import time
-
 from fastapi import APIRouter, Request
 
-from app.api.deps import get_nodes
-from app.schemas import HeroSlide, HomeResponse, SpotCard
+from app.api.deps import get_spot_repo
+from app.schemas import HeroSlide, HomeResponse
 
 router = APIRouter(tags=["home"])
 
-# 首页展示用的关键词池（前几个给 hero，其余给 recommended）。
-# 每个词取搜索第一名；搜不到就跳过 —— **不硬凑**（A39）。
-# ⚠️ 关键词选择兼顾 mock 池（providers/mock.py 9 个成都 POI）与真实高德，
-#     两边都能命中，演示与上线行为一致。
-_HERO_KEYWORDS = ("宽窄巷子", "武侯祠", "成都大熊猫繁育研究基地", "人民公园")
-_RECOMMEND_KEYWORDS = ("锦里古街", "成都太古里", "春熙路步行街", "都江堰景区")
-
-_HOME_CACHE_TTL = 600.0
-_home_cache: tuple[float, HomeResponse] | None = None
-
-
-def _to_spot_card(poi) -> SpotCard:
-    return SpotCard(
-        poi_id=poi.poi_id,
-        name=poi.name,
-        city=poi.cityname,
-        district=poi.adname,
-        address=poi.address,
-        lng=poi.lng,
-        lat=poi.lat,
-        cost_per_person=poi.cost_per_person,
-        rating=poi.rating,
-        photos=list(poi.photos or []),
-        typecode=poi.typecode,
-    )
+_HERO_MAX = 3
+_RECOMMEND_MAX = 4
 
 
 @router.get("/home", response_model=HomeResponse)
 async def home(request: Request) -> HomeResponse:
-    global _home_cache
-    now = time.monotonic()
-    if _home_cache is not None and now - _home_cache[0] < _HOME_CACHE_TTL:
-        return _home_cache[1]
+    cards, _total = get_spot_repo(request).list_all(limit=50)
 
-    provider = get_nodes(request).provider
+    # hero：排序在前、且**带照片**的最多 3 个（没图不硬凑，A39）
+    hero_cards = [c for c in cards if c.photos][:_HERO_MAX]
+    hero_ids = {c.poi_id for c in hero_cards}
 
-    hero_pois: list = []
-    rec_pois: list = []
-    seen: set[str] = set()
+    # recommended：评分降序前 4，排除 hero（契约：两区不重复）
+    rec_cards = [c for c in cards if c.poi_id not in hero_ids][:_RECOMMEND_MAX]
 
-    async def _first(keyword: str):
-        """关键词 → 第一个没见过的 POI；搜不到/重复 = 跳过（不硬凑）。"""
-        results = await provider.search_poi(keyword, limit=3)
-        for poi in results:
-            if poi.poi_id not in seen:
-                seen.add(poi.poi_id)
-                return poi
-        return None
-
-    for kw in _HERO_KEYWORDS:
-        poi = await _first(kw)
-        if poi is not None and poi.photos:
-            hero_pois.append(poi)
-    for kw in _RECOMMEND_KEYWORDS:
-        poi = await _first(kw)
-        if poi is not None:
-            rec_pois.append(poi)
-
-    resp = HomeResponse(
+    return HomeResponse(
         hero=[
-            HeroSlide(poi_id=p.poi_id, name=p.name, city=p.cityname or "成都", photo=p.photos[0])
-            for p in hero_pois[:5]
+            # HeroSlide.city 是必填 str；收录库个别行可能为空 → 回落区县，再空就空串（不编）
+            HeroSlide(poi_id=c.poi_id, name=c.name, city=c.city or c.district or "", photo=c.photos[0])
+            for c in hero_cards
         ],
-        recommended=[_to_spot_card(p) for p in rec_pois[:4]],
+        recommended=rec_cards,
     )
-    _home_cache = (now, resp)
-    return resp
