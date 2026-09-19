@@ -1983,6 +1983,22 @@ LLM 调用**，其中子 agent 的"出关键词→搜→看结果"决策轮占 *
 
 ---
 
+### D82 · 后端日志落盘：`app.*` logger 挂按天滚动文件 handler　`P2 可运维性`　2026-09-19
+
+> **决定**：`create_app` 内给 `app.*` logger 挂 `TimedRotatingFileHandler`
+> （`backend/logs/app.log`，午夜滚动、保留 14 天、UTF-8），幂等 guard 防重复挂。
+
+| 替代方案 | 否决理由 |
+|---|---|
+| 维持 stderr-only（现状） | uvicorn 控制台一关，`errors.py` 500 兜底打的 exception 堆栈就没了 —— 事后无法排障 |
+| loguru / structlog | 单进程小项目标准库够用，不为此加依赖 |
+| 中间件记全量 access log | uvicorn 自带 access log；要的是"错误可追溯"，不是流量报表 |
+
+**代价**：`backend/logs/` 持续增长（14 天自动清，可控）；pytest 造 app 也会建目录（无害，目录已在 .gitignore）。
+**重审触发**：需要结构化日志 / 集中采集时。
+
+---
+
 ## 六、悬而未决（明确没定，别在正文假装定了）
 
 | 项 | 现状 | 什么时候定 | 不定的后果 |

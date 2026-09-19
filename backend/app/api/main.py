@@ -15,6 +15,8 @@
 
 from __future__ import annotations
 
+import logging
+from logging.handlers import TimedRotatingFileHandler
 from typing import Any
 
 from fastapi import Depends, FastAPI
@@ -133,6 +135,28 @@ def create_app(
     app.include_router(chat.router, prefix="/api", dependencies=[global_limit])
 
     register_handlers(app)
+
+    # ── 日志落盘（D82）──
+    # errors.py 的 500 兜底只 logging.exception 到 stderr —— uvicorn 控制台一关，
+    # 堆栈就没了，事后无法排障。这里给 `app.*` logger 挂按天滚动文件 handler
+    # （backend/logs/app.log，午夜滚动、保留 14 天）。
+    # 幂等 guard：pytest / --reload 反复 import + create_app 时 handler 只挂一次。
+    _log_dir = Path(__file__).resolve().parents[2] / "logs"
+    _log_dir.mkdir(exist_ok=True)
+    _app_logger = logging.getLogger("app")
+    if not any(
+        isinstance(_h, TimedRotatingFileHandler)
+        and getattr(_h, "baseFilename", None) == str(_log_dir / "app.log")
+        for _h in _app_logger.handlers
+    ):
+        _fh = TimedRotatingFileHandler(
+            _log_dir / "app.log", when="midnight", backupCount=14, encoding="utf-8"
+        )
+        _fh.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+        )
+        _app_logger.addHandler(_fh)
+        _app_logger.setLevel(logging.INFO)
 
     # ── CORS：只对 /api 生效的判断交给浏览器侧（origin 不在名单就不给头）──
     # 这是联调配置不是接口契约 —— 生产部署若前后端同源，删掉这两行即可。

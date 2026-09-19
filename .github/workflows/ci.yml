@@ -1,0 +1,54 @@
+# CI（2026-09-19，「脱离 demo 级别」计划 P2）
+#
+# backend：pytest 全量。测试全程不连 MySQL、不连 LLM（fakes + InMemory 替身），
+#   但 config.py 在 import 链上就执行 _require("LLM_API_KEY")，缺键直接 ConfigError ——
+#   所以用 env 注入占位值：load_dotenv(override=False) 下环境变量优先于 .env，
+#   且测试根本不会真正发起 LLM 调用，占位值不会被使用。
+# frontend：tsc 全量类型检查 + oxlint（与 AGENTS.md「怎么跑」的验收命令一致）。
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    env:
+      LLM_API_KEY: ci-placeholder-not-a-real-key
+      JWT_SECRET: ci-placeholder-secret
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      - name: 后端全量测试
+        working-directory: backend
+        run: python -m pytest tests/ -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 安装依赖
+        working-directory: frontend
+        run: npm ci
+
+      - name: 类型检查
+        working-directory: frontend
+        run: npx tsc --noEmit
+
+      - name: Lint（oxlint）
+        working-directory: frontend
+        run: npm run lint
