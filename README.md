@@ -52,7 +52,7 @@ flowchart TB
   end
 
   FE["前端：React 19 + Vite + Tailwind 4<br/>对话 / 路线总览 / 景点搜索 / 攻略社区 / 个人中心"]
-  API["后端：FastAPI<br/>36 个端点 · SSE 流式 · JWT · 按接口成本分层限流"]
+  API["后端：FastAPI<br/>38 个端点 · SSE 流式 · JWT · 按接口成本分层限流"]
   OUT["行程输出：带坐标 · 开放时间 · 校验三态"]
   V["高德 Web 服务（real）<br/>内置 9 个真实 POI 池（mock）"]
   DB[("MySQL 8<br/>业务表 + langgraph-checkpoint")]
@@ -158,15 +158,15 @@ backend/app/
   graph/          agent 内核：意图 / 工具循环 / 生成 / 校验 / 修正 / 粘贴路径
   tools/          3 个工具（search_poi / get_weather / calc_distance）
   providers/      数据源：amap（真）/ mock（9 点池）—— 同签名可切换
-  api/routes/     36 个端点，按资源分文件
-  schemas.py      ★ 数据契约唯一事实源（69 个导出名）
+  api/routes/     38 个端点，按资源分文件
+  schemas.py      ★ 数据契约唯一事实源（70 个导出名）
   store/          MySQL 仓储
-  services/       鉴权 / 限流 / 上传等
-backend/tests/    593 个用例（`pytest tests/ -q`，2026-09-17 实测全绿）
-eval/             评测集（12 条 case + runner + 报告）
-docs/api.md       接口契约（37 个端点 / 9 种 SSE 事件 / 错误码表）
-docs/types.ts     62 个 TS 类型 —— 由 schemas.py 自动生成，前端不手抄
-DECISIONS.md      ★ 64 条决策记录：为什么这么定 / 没选什么 / 代价 / 重审触发
+  services/       攻略渲染（guide_render.py）—— 限流在 api/ratelimit.py
+backend/tests/    612 个用例（`pytest tests/ -q`，2026-09-19 实测全绿）
+eval/             评测集（13 条 case + runner + 报告）
+docs/api.md       接口契约（38 个端点 / 10 种 SSE 事件 / 错误码表）
+docs/types.ts     67 个 TS 类型 —— 由 schemas.py 自动生成，前端不手抄
+DECISIONS.md      ★ 81 条决策记录：为什么这么定 / 没选什么 / 代价 / 重审触发
 方案.md            做什么         技术方案.md  怎么实现        界面设计.md  长什么样
 ```
 
@@ -193,7 +193,7 @@ DECISIONS.md      ★ 64 条决策记录：为什么这么定 / 没选什么 / �
 
 ## 八、评测
 
-`eval/` 下 12 条 case，覆盖 3 类判据的**边界对**（界内绿 ↔ 超一点红）。
+`eval/` 下 13 条 case，覆盖 3 类判据的**边界对**（界内绿 ↔ 超一点红）。
 
 定位是 **regression set（回归防线），不是 benchmark** —— 它的用处是回答"改 prompt / 换模型之后，
 系统是变好还是变差"，不是"这个 agent 有多强"。
@@ -235,6 +235,7 @@ DECISIONS.md      ★ 64 条决策记录：为什么这么定 / 没选什么 / �
 
 | 文件 | 只回答 |
 |---|---|
+| `AGENTS.md` | **AI 协作入口**：项目一句话 / 目录地图 / 铁律速查 —— 任何 AI 进仓库干活先读这页 |
 | `方案.md` | **做什么**（含 A1~A44 决策与用户确认原话） |
 | `技术方案.md` | **怎么实现** |
 | `界面设计.md` | **长什么样**（设计 token / 视觉规范） |
