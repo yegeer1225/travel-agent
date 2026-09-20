@@ -194,6 +194,25 @@ def test_spot_list_paging(api):
     assert len(data["items"]) == 1
 
 
+def test_spot_list_limit_100_accepted(api):
+    """R2（2026-09-20）：收录库 10 城 100 条，前端方案 B（前端交接 20.8）
+    `listSpots(100)` 一次拉全量 —— limit=100 必须是 200（旧 le=50 会 400 invalid_param）。
+    收录库只有 2 条 → items=2，但 **total 恒为真值**（分页语义，与 limit 无关）。"""
+    r = api.get("/api/spots", params={"limit": 100, "offset": 0})
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["total"] == 2          # total = 全量收录数，不随 limit 放大
+    assert len(data["items"]) == 2     # 库里就 2 条，全给
+
+
+def test_spot_list_limit_over_100_rejected(api):
+    """上限提到 100（R2）不等于放开 —— 101 仍要 400 invalid_param，防止有人顺手把 le 删了。
+    （全局异常处理器把 RequestValidationError 统一转 400 `invalid_param`，不是裸 422。）"""
+    r = api.get("/api/spots", params={"limit": 101})
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "invalid_param"
+
+
 def test_spot_list_requires_auth(api):
     bare = TestClient(api.app)
     assert bare.get("/api/spots").status_code == 401

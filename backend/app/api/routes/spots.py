@@ -59,7 +59,9 @@ def _to_spot_card(poi) -> SpotCard:
 @router.get("/spots", response_model=SpotListResponse)
 async def list_spots(
     request: Request,
-    limit: int = Query(default=20, ge=1, le=50),
+    # 上限 100（2026-09-20 后端交接 R2）：收录库扩至 10 城 100 条，前端方案 B
+    # （前端交接 20.8）一次拉全量本地过滤城市 —— le=50 会把 listSpots(100) 打成 400
+    limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     user_id: int = Depends(get_current_user_id),
 ) -> SpotListResponse:
@@ -82,7 +84,7 @@ async def search_spots(
     request: Request,
     keywords: str = Query(..., description="搜索关键词，为空 400"),
     city: str | None = Query(default=None),
-    limit: int = Query(default=20, ge=1, le=50),
+    limit: int = Query(default=20, ge=1, le=100),  # 与 /spots 同步提上限（R2，2026-09-20）
     offset: int = Query(default=0, ge=0),
     user_id: int = Depends(get_current_user_id),
 ) -> SpotSearchResponse:
