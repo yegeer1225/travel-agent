@@ -214,9 +214,9 @@ export default function Assistant() {
       const ac = new AbortController()
       acRef.current = ac
 
-      // ── 15.13 SSE 断线重连：断流（EOF 无 done）退避重连 1s→2s→4s，最多 3 次 ──
+      // ── 15.13 SSE 断线重连：断流（EOF 无 done）退避重连 1.5s→3s→6s，最多 3 次（20.2）──
       // 重连复用同一 POST /chat，带 Last-Event-ID 触发后端恢复（从 checkpoint 续推，不重复落用户消息）
-      const RETRY_DELAYS = [1000, 2000, 4000]
+      const RETRY_DELAYS = [1500, 3000, 6000]
       const MAX_RETRY = 3
       let lastEventId: string | null = null
       let attempts = 0

@@ -187,27 +187,9 @@ export default function Overview() {
   }, [trip, busy, streaming])
 
   // ── 发布为攻略（M12 · api.md 3.8）──
-  // 🔴 判据每次点击现查（GET /guides?source_trip_id=），不用页面缓存 —— 本地状态一定会过期
-  const handlePublishClick = useCallback(async () => {
-    if (!trip || publishing) return
-    setPublishing(true) // 立即挡双击
-    setErrorBar(null)
-    setPublishDone(null)
-    try {
-      const page = await listGuides({ source_trip_id: trip.trip_id })
-      if (page.total === 0) {
-        await doPublish(trip.trip_id)
-      } else {
-        setPublishCheck(page.items)
-        setPublishDialogOpen(true)
-      }
-    } catch (e) {
-      setErrorBar(e instanceof Error ? e.message : String(e))
-      setPublishing(false)
-    }
-  }, [trip, publishing])
-
   // 🔴 Idempotency-Key：在 click handler 内生成一次，本次意图的所有重试共用；请求结束作废
+  // ⚠️ 必须声明在 handlePublishClick 之前 —— 它内部要调 doPublish，
+  //    写到后面会被 lint 判为 "read during its own initialization"（TDZ 隐患）
   const doPublish = useCallback(async (tid: string) => {
     const key = crypto.randomUUID()
     setPublishRequesting(true)
@@ -226,6 +208,26 @@ export default function Overview() {
       setPublishDialogOpen(false)
     }
   }, [])
+
+  // 🔴 判据每次点击现查（GET /guides?source_trip_id=），不用页面缓存 —— 本地状态一定会过期
+  const handlePublishClick = useCallback(async () => {
+    if (!trip || publishing) return
+    setPublishing(true) // 立即挡双击
+    setErrorBar(null)
+    setPublishDone(null)
+    try {
+      const page = await listGuides({ source_trip_id: trip.trip_id })
+      if (page.total === 0) {
+        await doPublish(trip.trip_id)
+      } else {
+        setPublishCheck(page.items)
+        setPublishDialogOpen(true)
+      }
+    } catch (e) {
+      setErrorBar(e instanceof Error ? e.message : String(e))
+      setPublishing(false)
+    }
+  }, [trip, publishing, doPublish])
 
   const onPublishConfirm = useCallback(() => {
     if (!trip) return

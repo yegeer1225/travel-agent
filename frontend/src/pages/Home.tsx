@@ -5,6 +5,7 @@ import { fetchHome } from '../lib/api'
 import HeroCarousel from '../components/HeroCarousel'
 
 function SpotCardView({
+  poiId,
   name,
   city,
   district,
@@ -14,6 +15,7 @@ function SpotCardView({
   raised,
   photos,
 }: {
+  poiId: string
   name: string
   city: string | null
   district: string | null
@@ -24,7 +26,15 @@ function SpotCardView({
   photos: string[]
 }) {
   return (
-    <div className={`card overflow-hidden ${raised ? 'raise' : ''}`}>
+    <Link
+      to={`/spots/${poiId}`}
+      className={`card group relative overflow-hidden block transition-transform duration-150 hover:-translate-y-[3px] ${raised ? 'raise' : ''}`}
+    >
+      {/* 左上角三角角标（视觉稿 v3 rec-corner，装饰性卡片语言） */}
+      <div
+        className="absolute top-0 left-0 w-0 h-0"
+        style={{ borderTop: '26px solid var(--color-pop-yellow)', borderRight: '26px solid transparent' }}
+      />
       {/* 封面：photos[0] 真图（onError 隐藏，回退色块+站名，不用灰底占位图） */}
       <div
         className="h-[150px] flex items-center justify-center relative overflow-hidden"
@@ -42,8 +52,9 @@ function SpotCardView({
         ) : null}
         <span className="font-display font-bold text-[26px] tracking-wide uppercase">{name}</span>
       </div>
-      <div className="p-4 pb-[18px]">
-        <div className="flex justify-between items-center text-[13px] text-muted">
+      {/* 信息区：hover 整块变黄（铺满含 padding，不留白边），配合整卡上浮（20.8 互动） */}
+      <div className="p-4 pb-[18px] transition-colors duration-150 group-hover:bg-pop-yellow">
+        <div className="flex justify-between items-center text-[13px] text-muted transition-colors duration-150 group-hover:text-ink">
           <span>{district ?? city}</span>
           {rating && (
             <b className="text-ink font-bold">
@@ -51,11 +62,11 @@ function SpotCardView({
             </b>
           )}
         </div>
-        {cost !== null && <div className="mt-1 text-[13px] text-muted">人均 ¥{cost}</div>}
+        {cost !== null && <div className="mt-1 text-[13px] text-muted transition-colors duration-150 group-hover:text-ink">人均 ¥{cost}</div>}
         <div className="mt-3 h-[1px] bg-ink/15" />
-        <div className="text-[12px] text-muted mt-2">高德真实景点数据</div>
+        <div className="text-[12px] text-muted mt-2 transition-colors duration-150 group-hover:text-ink">高德真实景点数据</div>
       </div>
-    </div>
+    </Link>
   )
 }
 
@@ -77,11 +88,17 @@ export default function Home() {
 
   return (
     <div className="relative">
-      {/* ── 装饰层（首页可略多，全部落留白处，不贴文字/按钮/卡片）── */}
+      {/* ── 装饰层（视觉稿 v3 全量：14 个，收敛克制，全部落留白处，不贴文字/按钮/卡片）── */}
+      {/* Hero 顶部与文字区边角 */}
+      <div className="deco deco-circle" style={{ width: 14, height: 14, background: 'var(--color-pop-red)', top: 104, left: 520 }} />
       <div className="deco deco-ring" style={{ width: 48, height: 48, top: 120, left: 36 }} />
       <div className="deco deco-tri" style={{ width: 38, height: 34, background: 'var(--color-pop-blue)', top: 236, left: 600, transform: 'rotate(14deg)' }} />
+      <div className="deco deco-circle" style={{ width: 16, height: 16, background: 'var(--color-pop-green)', top: 486, left: 618 }} />
+
+      {/* Hero 右视觉区边角 */}
       <div className="deco deco-circle" style={{ width: 140, height: 140, background: 'var(--color-pop-red)', opacity: 0.85, top: 16, right: -44 }} />
       <div className="deco deco-ring" style={{ width: 34, height: 34, top: 128, right: 252 }} />
+      <div className="deco deco-circle" style={{ width: 12, height: 12, background: 'var(--color-pop-yellow)', top: 252, left: 742 }} />
       <div className="deco deco-half" style={{ width: 44, height: 88, background: 'var(--color-pop-green)', top: 316, right: 8 }} />
       <div className="deco deco-tri" style={{ width: 56, height: 48, background: 'var(--color-pop-cyan)', bottom: 14, right: 168, transform: 'rotate(200deg)' }} />
       <div className="deco deco-dots" style={{ width: 72, height: 40, bottom: 10, left: 26, opacity: 0.75 }} />
@@ -134,6 +151,12 @@ export default function Home() {
 
       {/* ── 猜你喜欢（静态 4 张卡，不做轮播）── */}
       <section className="relative px-14 pb-[72px]">
+        {/* 猜你喜欢区边角（视觉稿 v3） */}
+        <div className="deco deco-tri" style={{ width: 32, height: 28, background: 'var(--color-pop-green)', top: 8, right: 96, transform: 'rotate(20deg)' }} />
+        <div className="deco deco-circle" style={{ width: 12, height: 12, background: 'var(--color-pop-red)', top: 72, left: 852 }} />
+        <div className="deco deco-ring" style={{ width: 26, height: 26, bottom: 26, left: 72 }} />
+        <div className="deco deco-dots" style={{ width: 80, height: 44, bottom: 22, right: 140, opacity: 0.6 }} />
+
         <div className="relative z-[2] flex items-baseline gap-4 mb-8">
           <h2 className="font-display font-bold text-[34px]">猜你喜欢</h2>
           <span className="text-[14px] text-muted">高德真实景点数据</span>
@@ -149,6 +172,7 @@ export default function Home() {
             {data.recommended.slice(0, 4).map((r, i) => (
               <SpotCardView
                 key={r.poi_id}
+                poiId={r.poi_id}
                 name={r.name}
                 city={r.city}
                 district={r.district}

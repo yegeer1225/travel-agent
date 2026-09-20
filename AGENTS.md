@@ -99,4 +99,4 @@ cd frontend && npx tsc --noEmit && npm run lint
 「脱离 demo 级别」完善：后端侧已收口 —— README 数字修正、CI（`.github/workflows/ci.yml`）、
 日志落盘（D82）、`GET /spots` 列表 + `/home` 收录库化（后端交接 R1）；
 前端侧健壮性清单在 `前端交接.md` 第二十节（ErrorBoundary / SSE 重连 / 404 / typecode 映射，交豆包）。
-协作流：叶鸽儿拍板 → 后端 AI / 前端豆包按交接文档执行 → 验收清单逐条过。
+协作流：项目负责人拍板 → 后端 AI / 前端豆包按交接文档执行 → 验收清单逐条过。

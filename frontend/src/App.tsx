@@ -10,6 +10,7 @@ import Guides from './pages/Guides'
 import GuideDetail from './pages/GuideDetail'
 import Profile from './pages/Profile'
 import Login from './pages/Login'
+import NotFound from './pages/NotFound'
 import { isLoggedIn } from './lib/auth'
 
 /** 鉴权前置页守卫：除 /login 外全部要求登录（M9），无 token → 跳登录并带回跳地址 */
@@ -38,7 +39,7 @@ export default function App() {
         <Route path="/overview" element={<RequireAuth><Overview /></RequireAuth>} />
         <Route path="/overview/:tripId" element={<RequireAuth><Overview /></RequireAuth>} />
         <Route path="/profile" element={<RequireAuth><Profile /></RequireAuth>} />
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>
   )

@@ -132,13 +132,13 @@ def test_user_out_has_no_password_field() -> None:
 
     # 就算有人手贱传进来，extra="forbid" 会直接报错而不是静默丢弃
     with pytest.raises(ValidationError):
-        s.UserOut(id=1, username="yegeer", created_at=NOW, password_hash="x")  # type: ignore[call-arg]
+        s.UserOut(id=1, username="alice", created_at=NOW, password_hash="x")  # type: ignore[call-arg]
 
 
 def test_bcrypt_length_limit_is_enforced() -> None:
     """bcrypt 只吃前 72 字节，超了会静默截断 → 必须在契约层挡掉。"""
     with pytest.raises(ValidationError):
-        s.RegisterRequest(username="yegeer", password="x" * 73)
+        s.RegisterRequest(username="alice", password="x" * 73)
 
 
 # ────────────────────────────────────────────────

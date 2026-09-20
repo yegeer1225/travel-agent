@@ -1,5 +1,6 @@
 import { Swiper, SwiperSlide } from 'swiper/react'
 import { Pagination, Autoplay } from 'swiper/modules'
+import { Link } from 'react-router-dom'
 import 'swiper/css'
 import 'swiper/css/pagination'
 import type { HeroSlide } from '../types/contract'
@@ -8,12 +9,16 @@ import type { HeroSlide } from '../types/contract'
  * 首页 Hero 轮播（Swiper，全站唯一，只在首页出现一次）。
  * hero < 3 张不做轮播，直接单图（api.md 3.6）。
  * 图片加载失败 → 纯色块 + 站名（不显示灰底占位图）。
+ * 每张 slide 可点 → /spots/{poi_id} 详情页（与猜你喜欢/收录列表同入口）。
  */
 export default function HeroCarousel({ slides }: { slides: HeroSlide[] }) {
   if (slides.length === 0) return null
 
   const renderSlide = (s: HeroSlide) => (
-    <div className="relative w-full h-[340px] overflow-hidden border border-ink rounded-[4px] bg-pop-cyan">
+    <Link
+      to={`/spots/${s.poi_id}`}
+      className="relative w-full h-[340px] overflow-hidden border border-ink rounded-[4px] bg-pop-cyan block transition-transform duration-150 hover:-translate-y-[3px]"
+    >
       {s.photo ? (
         <img
           src={s.photo}
@@ -34,7 +39,7 @@ export default function HeroCarousel({ slides }: { slides: HeroSlide[] }) {
       <div className="absolute bottom-3 left-3 bg-ink text-white text-[12px] px-2.5 py-1 rounded-[2px] z-10">
         {s.name} · {s.city}
       </div>
-    </div>
+    </Link>
   )
 
   if (slides.length < 3) {

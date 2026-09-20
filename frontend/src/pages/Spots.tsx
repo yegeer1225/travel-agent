@@ -3,16 +3,28 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import type { SpotCard } from '../types/contract'
 import { addFavorite, listSpots, searchSpots, ApiError } from '../lib/api'
 import { getToken } from '../lib/auth'
-
-/** 原始编码如「风景名胜;寺庙道观」→ 取最后一段显示（19.3） */
-function lastType(t: string | null): string | null {
-  if (!t) return null
-  const parts = t.split(/[;；]/).map((x) => x.trim()).filter(Boolean)
-  return parts.length ? parts[parts.length - 1] : null
-}
+import { typecodeLabel } from '../lib/typecode'
 
 /** 默认态快捷搜索词（19.4）：搜索入口不是数据，点 = 填词 + 真实搜索一次 */
 const QUICK_WORDS = ['宽窄巷子', '大熊猫繁育研究基地', '武侯祠', '锦里', '金沙遗址', '人民公园', '文殊院', '东郊记忆']
+
+/** 城市 tab（20.8 方案 B 本地过滤）：tab 显示短名，库里 city 是高德原值（带「市」后缀）——
+ *  🔴 必须走这张映射表，禁止用 includes 糊匹配 */
+const CITY_TABS = [
+  { label: '全部', value: '' },
+  { label: '北京', value: '北京市' },
+  { label: '上海', value: '上海市' },
+  { label: '杭州', value: '杭州市' },
+  { label: '苏州', value: '苏州市' },
+  { label: '南京', value: '南京市' },
+  { label: '西安', value: '西安市' },
+  { label: '重庆', value: '重庆市' },
+  { label: '广州', value: '广州市' },
+  { label: '厦门', value: '厦门市' },
+]
+
+/** 默认态网格初始显示条数（20.6）与每次「加载更多」追加量 */
+const PAGE_SIZE = 20
 
 function ResultCard({ s, hasToken }: { s: SpotCard; hasToken: boolean }) {
   const nav = useNavigate()
@@ -34,7 +46,7 @@ function ResultCard({ s, hasToken }: { s: SpotCard; hasToken: boolean }) {
     }
   }
 
-  const typeLabel = lastType(s.typecode)
+  const typeLabel = typecodeLabel(s.typecode)
 
   return (
     <div
@@ -134,8 +146,10 @@ export default function Spots() {
   // 登录后跳回本页（路由变化）→ 重渲染 → hasToken 重新求值（P3：不再只算一次）
   useLocation()
   const hasToken = !!getToken()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const urlKw = searchParams.get('kw') ?? '' // 导航栏搜索框带过来的词（15.3）
+  /** 选中城市（20.8）：存高德原值「北京市」，由 URL 驱动 —— 后退/刷新/分享链接都不丢；「全部」= 空 */
+  const cityValue = searchParams.get('city') ?? ''
   const [keyword, setKeyword] = useState(urlKw)
   const [city, setCity] = useState('')
   const [items, setItems] = useState<SpotCard[] | null>(null)
@@ -145,14 +159,15 @@ export default function Spots() {
   const [meta, setMeta] = useState<{ source: string; cached: boolean } | null>(null)
   // 请求序列保护：自动搜索（URL 参数）与手动搜索并发时，只认最后一次发出的（过期响应丢弃）
   const seqRef = useRef(0)
-  // 默认态数据（GET /spots 全量分页，2026-09-18）
+  // 默认态数据（20.8 方案 B）：一次拉全量到本地，tab 秒切零请求；显示层本地截取（20.6）
   const [list, setList] = useState<SpotCard[] | null>(null)
   const [listTotal, setListTotal] = useState(0)
   const [listError, setListError] = useState<string | null>(null)
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
 
   useEffect(() => {
     let alive = true
-    listSpots(50)
+    listSpots(100) // 🔴 一次拉全量（20.8）；后端 limit 上限需 ≥100，否则 400 → 见后端交接.md R2
       .then((res) => {
         if (!alive) return
         setList(res.items)
@@ -165,6 +180,28 @@ export default function Spots() {
       alive = false
     }
   }, [])
+
+  /** 当前 tab 下的过滤结果（本地过滤，零请求）；「全部」= 全量 */
+  const filtered = list ? (cityValue === '' ? list : list.filter((s) => s.city === cityValue)) : []
+  /** 切 tab：offset 归零（重新从 20 条起）+ 城市写进 URL（全部 = 清参数） */
+  const switchCity = (value: string) => {
+    setVisibleCount(PAGE_SIZE)
+    if (value === '') {
+      setSearchParams((p) => {
+        const q = new URLSearchParams(p)
+        q.delete('city')
+        return q
+      })
+    } else {
+      setSearchParams((p) => {
+        const q = new URLSearchParams(p)
+        q.set('city', value)
+        return q
+      })
+    }
+  }
+  /** 加载更多：本地截取加 20（20.6 语义，切 tab 后归零） */
+  const loadMore = () => setVisibleCount((c) => c + PAGE_SIZE)
 
   const runSearch = async (kw: string, cityName: string) => {
     const seq = ++seqRef.current
@@ -242,26 +279,50 @@ export default function Spots() {
 
       {/* 默认态：平铺收录库封面卡（与首页猜你喜欢同款视觉），整卡可点进详情。
           数据来自 GET /spots（真实收录库），不是硬凑 —— total 也是后端给的。
-          快捷词保留：点 = 填词 + 真实搜索一次，是搜索入口不是装饰 */}
+          城市 tabs（20.8）：本地过滤、写 URL；快捷词保留：点 = 填词 + 真实搜索一次 */}
       {!error && items === null && !loading && (
         <div className="mt-8">
           {listError && <div className="text-status-fail text-[13px]">收录列表加载失败：{listError}</div>}
           {!listError && list === null && <div className="text-muted">加载中…</div>}
           {list !== null && (
             <>
+              {/* 城市 tabs（20.8）：选中写 URL /spots?city=原值；只作用于默认态网格 */}
+              <div className="flex flex-wrap items-center gap-2 mb-4">
+                {CITY_TABS.map((t) => (
+                  <button
+                    key={t.label}
+                    className={
+                      cityValue === t.value
+                        ? 'btn-outline !text-[13px] !px-3 !py-1.5 bg-pop-yellow !border-ink'
+                        : 'btn-outline !text-[13px] !px-3 !py-1.5'
+                    }
+                    onClick={() => switchCity(t.value)}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
               <div className="flex items-center gap-3 mb-4 text-[12px] text-muted">
-                <span>共收录 {listTotal} 个景点</span>
+                <span>共收录 {cityValue === '' ? listTotal : filtered.length} 个景点</span>
                 <span>点击卡片查看详情</span>
               </div>
-              {list.length === 0 ? (
+              {filtered.length === 0 ? (
                 <div className="mt-12 text-center text-muted">
-                  收录库暂无景点，试试上方搜索
+                  {list.length === 0 ? '收录库暂无景点，试试上方搜索' : '该城市暂无收录景点，试试其他城市'}
                 </div>
               ) : (
                 <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
-                  {list.map((s) => (
+                  {filtered.slice(0, visibleCount).map((s) => (
                     <CoverCard key={s.poi_id} s={s} />
                   ))}
+                </div>
+              )}
+              {/* 加载更多（20.6，本地截取）：已显示数 >= 过滤后 total 时按钮消失；切 tab 归零 */}
+              {filtered.length > visibleCount && (
+                <div className="mt-6 text-center">
+                  <button className="btn-outline !text-[13px]" onClick={loadMore}>
+                    加载更多
+                  </button>
                 </div>
               )}
               <div className="mt-8">
