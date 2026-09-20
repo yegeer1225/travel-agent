@@ -95,8 +95,9 @@ cd frontend && npx tsc --noEmit && npm run lint
 
 ## 7. 当前状态（改完代码顺手更新这一行）
 
-后端 **612 测试全绿**；模块 M0~M12 全关闭；性能收口（同需求 9m14s→3m55s，D76~D82）。
-「脱离 demo 级别」完善：后端侧已收口 —— README 数字修正、CI（`.github/workflows/ci.yml`）、
-日志落盘（D82）、`GET /spots` 列表 + `/home` 收录库化（后端交接 R1）；
-前端侧健壮性清单在 `前端交接.md` 第二十节（ErrorBoundary / SSE 重连 / 404 / typecode 映射，交豆包）。
+后端 **614 测试全绿**；模块 M0~M12 全关闭；性能收口（同需求 9m14s→3m55s，D76~D82）。
+「脱离 demo 级别」完善：**前后端双侧已收口** —— README 数字修正、CI（`.github/workflows/ci.yml`）、
+日志落盘（D82）、`GET /spots` 列表 + `/home` 收录库化（后端交接 R1）、limit 提上限 100（R2）；
+前端第二十节全部交付（ErrorBoundary / SSE 重连 / 404 / typecode 映射 / 城市 tabs / 加载更多 / lightbox）。
+**公开仓准备已完成**：MIT LICENSE、文档真实姓名脱敏、91 commit 全历史密钥审计通过。
 协作流：项目负责人拍板 → 后端 AI / 前端豆包按交接文档执行 → 验收清单逐条过。
