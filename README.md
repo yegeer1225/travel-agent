@@ -8,6 +8,24 @@ agent 引擎是唯一主线，CRUD 只做"能接回主线"的部分。
 
 ---
 
+## 先看长什么样
+
+| 首页 · 一句话入口 | 景点页 · 收录库 + 城市分类 |
+|---|---|
+| ![首页](docs/screenshots/01-home.png) | ![景点页](docs/screenshots/02-spots.png) |
+
+| 行程总览 · 逐站 + 距离 + 校验三态 | 攻略社区 · AI 行程一键转攻略 |
+|---|---|
+| ![行程总览](docs/screenshots/04-overview.png) | ![攻略社区](docs/screenshots/05-guides.png) |
+
+| 个人中心 · 规划记录 / 收藏 | AI 路线规划助手 · 流式对话 |
+|---|---|
+| ![个人中心](docs/screenshots/06-profile.png) | ![助手](docs/screenshots/03-assistant.png) |
+
+> 截图来自**真实运行**（real 档高德数据，2026-09-20）。景点页底部「共收录 100 个景点」= 10 城 × 10 条收录库实况。
+
+---
+
 ## 一、它和"让大模型写一份行程"的区别
 
 | 常见做法 | 这里的做法 |
