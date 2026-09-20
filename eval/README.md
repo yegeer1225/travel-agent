@@ -47,6 +47,27 @@ cd /d/vscode\ Projiects/agent   # 项目根
 代价是慢 —— 同类 prompt 实测 51.8s vs `deepseek-flash` 3.7s（差 14 倍），
 hotstart 一条就从 3s 涨到 100s+。要跑全量建议留给睡前。
 
+## 消融对照：`run_eval` 报"多少分"，`ablation.py` 报"判据值多少"
+
+`run_eval.py` 的 pass@k = 100% **不证明判据有用**（自己出题自己考）。消融回答另一半：
+把某条硬判据摘掉，会漏掉哪个错 —— **掉下来的那部分才是这条判据的价值**。
+
+```bash
+# 1. 跑基线 + 录存产物（耗 token，一次就好；mock = 高德零出账，LLM 照样真调）
+./.venv/Scripts/python.exe eval/ablation.py --provider mock --label ablate
+
+# 2. 离线重判（零 token，可反复跑、可加变体）
+./.venv/Scripts/python.exe eval/ablation.py \
+    --from eval/reports/<stamp>-ablate-trips.json --label ablation
+```
+
+为什么能离线：热启动（粘贴）路径 `validate_trip` 只把结果写进 `trip.checks`，
+**判据不回流改行程**（`paste.py`）→「引擎摘掉判据 X」等价于「同一份产物去掉 code==X 后重判」。
+⚠️ 冷启动（校验失败会打回重排）**不适用**这个等价，必须真跑，本脚本只做热启动。
+
+表怎么读：`Δ抓错率` = 该判据的守备范围；`Δ通过率` = 它在总分里的权重；
+**没有任何变化 = 本批用例的盲区**（不是判据没用，是没有考点压它）。
+
 ## 报告里四个数字怎么看
 
 | 指标 | 含义 | 看什么 |
