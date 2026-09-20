@@ -484,7 +484,7 @@ def test_weather_window_is_four_days_not_three():
     """⭐ 官方文档写 3 天，**实测 4 天**。这条断言是把实测结论钉住。
 
     （探针第 ④ 步的输出就是证据；如果哪天高德改回 3 天，这条会红，
-      提醒我们回去改 `技术方案.md` 和 `api.md`。）
+      提醒我们回去改内部技术方案和 `api.md`。）
     """
     casts = load("weather_chengdu.json")["forecasts"][0]["casts"]
     assert len(casts) == 4

@@ -10,7 +10,7 @@
 
 启动（开发）：
     cd backend && ../.venv/Scripts/python.exe -m uvicorn app.api.main:app --port 8000
-    # 前端 Vite 把 /api 代理到 127.0.0.1:8000（见 前端交接.md），所以路由带 /api 前缀
+    # 前端 Vite 把 /api 代理到 127.0.0.1:8000（见 内部前端交接清单），所以路由带 /api 前缀
 """
 
 from __future__ import annotations

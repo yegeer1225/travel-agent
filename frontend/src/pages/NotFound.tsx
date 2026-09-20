@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 
-/** 404 页（前端交接.md 20.3）：路由表 path="*" 兜底，不白屏 */
+/** 404 页（内部前端交接清单 20.3）：路由表 path="*" 兜底，不白屏 */
 export default function NotFound() {
   return (
     <div className="relative px-14 py-10">

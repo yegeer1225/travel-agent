@@ -269,7 +269,7 @@ def _build() -> Settings:
         #   · 确定性：思考模式下 temperature 失效；关掉后 temperature=0 才生效
         raise ConfigError(
             "LLM_THINKING_TOOL 不能是 enabled —— 工具循环节点必须关思考"
-            "（成本 + 确定性，详见 DECISIONS.md D8）"
+            "（成本 + 确定性，详见 D8）"
         )
 
     return Settings(

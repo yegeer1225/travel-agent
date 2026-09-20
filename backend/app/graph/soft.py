@@ -66,7 +66,7 @@ logger = logging.getLogger(__name__)
 
 
 class SoftCheckCode(StrEnum):
-    """4 条软判据（`方案.md` 6.1）。**`fail` 只提醒，永远不打回重排。**"""
+    """4 条软判据（内部需求文档 6.1）。**`fail` 只提醒，永远不打回重排。**"""
 
     NEEDS_BOOKING = "needs_booking"
     QUEUE_TIME = "queue_time"

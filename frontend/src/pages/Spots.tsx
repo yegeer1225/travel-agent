@@ -167,7 +167,7 @@ export default function Spots() {
 
   useEffect(() => {
     let alive = true
-    listSpots(100) // 🔴 一次拉全量（20.8）；后端 limit 上限需 ≥100，否则 400 → 见后端交接.md R2
+    listSpots(100) // 🔴 一次拉全量（20.8）；后端 limit 上限需 ≥100，否则 400 → 见内部后端交接清单 R2
       .then((res) => {
         if (!alive) return
         setList(res.items)

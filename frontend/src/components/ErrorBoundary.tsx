@@ -10,7 +10,7 @@ interface State {
 }
 
 /**
- * 渲染期错误兜底（前端交接.md 20.1）：包在 main.tsx 最外层，
+ * 渲染期错误兜底（内部前端交接清单 20.1）：包在 main.tsx 最外层，
  * 任何未捕获渲染错误 → 显示错误卡片而非整页白屏。
  */
 export default class ErrorBoundary extends Component<Props, State> {

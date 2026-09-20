@@ -2,7 +2,7 @@
 
 背景
 ----
-`技术方案.md` 风险 2 挂着的唯一不确定性：checkpoint 存 MySQL 用的是**第三方包**
+内部技术方案 风险 2 挂着的唯一不确定性：checkpoint 存 MySQL 用的是**第三方包**
 （`langgraph-checkpoint-mysql`，非 LangGraph 官方），它声明 `langgraph-checkpoint>=2.1.2`
 **没有上界**，而本地核心包已是 4.2.0。装得上不代表跑得通 —— 这个脚本只干一件事：
 把"能不能跑通"从**推测**变成**实测结论**。

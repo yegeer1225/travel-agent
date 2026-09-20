@@ -48,7 +48,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 # ══════════════════════════════════════════════════════════════
 #  两个常量集合（A25）—— 用 tuple 不用 set
 #
-#  ⚠️ `方案.md` 4.3 里写的是 `{"destination", ...}`（set 字面量）。
+#  ⚠️ 内部需求文档 4.3 里写的是 `{"destination", ...}`（set 字面量）。
 #  这里改成 **tuple**，因为 set **无序** —— 而追问文案要按固定顺序排
 #  （"先去哪座城市"排在"哪天出发"前面更像人话）。
 #  set 的成员判断能力 tuple 一样有，所以没有损失。

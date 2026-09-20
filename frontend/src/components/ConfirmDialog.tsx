@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 
 /**
- * 全站第一个弹窗（界面设计.md 2.7）：
+ * 全站第一个弹窗（内部设计规范 2.7）：
  * - 直角 4px + 白底 + 1px #E5E5E5 细边；遮罩 rgba(0,0,0,.35)，不加 blur
  * - 确认 = btn-black（黑实心 -1°），取消 = btn-outline；取消在左、确认在右
  * - Esc 取消；打开时焦点落在确认按钮；关闭后焦点还给触发它的按钮
